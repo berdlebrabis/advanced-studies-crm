@@ -3,7 +3,7 @@
 **Build:** CRM 1 — Contact Starter
 **Tested:** 2026-10-22
 **App:** `http://127.0.0.1:3001`
-**Demo video:** No published video URL or recording is available in this workspace. Add the published recording link here when supplied. Do not treat this placeholder as a video link.
+**Demo video:** [Watch the CRM 1 demo recording](https://github.com/berdlebrabis/advanced-studies-crm/blob/main/tests/crm1-demo.mp4) (MP4 file in this repository).
 
 ## Task 1 — Draw the app before coding
 
@@ -82,6 +82,7 @@ Real Node.js test code is in `test/contacts.test.js`; it uses `node:test`, an in
 
 ## Outstanding evidence and next steps
 
-- Demo video URL is not available yet; add a published recording before submitting if the instructor requires a link.
+- Demo video: [CRM 1 demo recording](https://github.com/berdlebrabis/advanced-studies-crm/blob/main/tests/crm1-demo.mp4).
 - The private repository collaborator check reports `timmb-ecta` has read access.
 - Memberships, donations, tasks, reports, and login/settings remain unfinished. Next build memberships and renewals, then donations, then tasks/reports/export and access settings.
+

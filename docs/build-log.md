@@ -28,4 +28,5 @@
 
 Use PowerShell: `npm install`, `$env:PORT = 3001`, then `npm start`. Open <http://localhost:3001>. Run `npm test` for the automated suite. Login/settings are not implemented, so no demo credentials exist. Memberships, donations, tasks, and reports are still marked “Not built yet.” Next build memberships/renewals, donations, then tasks/reports/export and login/settings.
 
-See `tests/crm1-tests.md` for the task-by-task starting data, steps, expected and actual results, and commit links. The demo-video URL remains outstanding because no recording URL is available.
+See `tests/crm1-tests.md` for the task-by-task starting data, steps, expected and actual results, and commit links. The demo video is stored at `tests/crm1-demo.mp4` and linked from `tests/crm1-tests.md`.
+
