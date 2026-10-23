@@ -66,3 +66,8 @@ test('duplicate contact ID returns a useful conflict and does not change count',
   assert.equal((await response.json()).error, 'A contact with that ID already exists.');
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM contacts').get().count, before);
 });
+
+test('contact form errors are announced assertively to assistive technology', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  assert.match(html, /id="form-message" role="alert" aria-live="assertive" aria-atomic="true"/);
+});

@@ -19,6 +19,6 @@ Task 1 screen sketches are in `docs/screens/`. The first working slice focuses o
 
 ## Three next changes
 
-1. Add the eight-screen menu and honest empty screens.
-2. Save contacts from the labeled form, one at a time, with household links created only after validation.
-3. Add case-insensitive search, blank-name rejection, and keyboard-visible focus.
+1. Build membership entry and renewals using the real contact records.
+2. Build donation entry and saved-gift history.
+3. Add tasks, reports, and export workflows, then finish login and settings.
