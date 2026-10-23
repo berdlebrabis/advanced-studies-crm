@@ -1,0 +1,13 @@
+✔ search is case-insensitive and no matches return an empty list (49.0377ms)
+✔ blank and spaces-only names are rejected without changing five contacts or creating a household (23.2734ms)
+✔ one valid contact save creates one sixth contact (2.4419ms)
+✔ duplicate contact ID returns a useful conflict and does not change count (1.9927ms)
+✔ contact form errors are announced assertively to assistive technology (0.7389ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 412.3762

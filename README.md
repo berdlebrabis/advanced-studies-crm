@@ -16,10 +16,16 @@ Open <http://localhost:3001>. Port 3000 is occupied by an older local CRM proces
 
 ## Current scope
 
-Task 1 screen sketches are in `docs/screens/`. The first working slice focuses on contact entry, search, and a small dashboard. Unfinished screens say “Not built yet.” The classroom records are fictional.
+Task 1 screen sketches are in `docs/screens/`. The first working slice focuses on contact entry, search, and a small dashboard. Unfinished screens say “Not built yet.” The classroom records are fictional. Login and settings are not built, so this demo has no login screen or demo credentials.
 
 ## Three next changes
 
 1. Build membership entry and renewals using the real contact records.
 2. Build donation entry and saved-gift history.
 3. Add tasks, reports, and export workflows, then finish login and settings.
+
+## Run automated tests
+
+```powershell
+npm test
+```
