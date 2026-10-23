@@ -1,124 +1,201 @@
 const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
-const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const dateFormat = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const rows = document.querySelector('#contact-rows');
 const searchInput = document.querySelector('#contact-search');
 const dialog = document.querySelector('#contact-dialog');
 const form = document.querySelector('#contact-form');
-let allContacts = [];
-let showAll = false;
+let contacts = [];
+let householdOptions = [];
 let householdOnly = false;
-let searchTimer;
+let selectedContactId = null;
 
-function initials(name) {
-  return name.split(/\s+/).slice(0, 2).map((part) => part[0] || '').join('').toUpperCase();
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
+}
+
+function setScreen(screenName) {
+  const knownScreens = ['dashboard', 'contacts', 'contact-details', 'memberships', 'donations', 'tasks', 'reports', 'settings'];
+  const nextScreen = knownScreens.includes(screenName) ? screenName : 'dashboard';
+  document.querySelectorAll('.screen').forEach((screen) => {
+    screen.hidden = screen.id !== `screen-${nextScreen}`;
+  });
+  document.querySelectorAll('.nav-link').forEach((link) => {
+    const active = link.dataset.screen === nextScreen;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  const section = document.querySelector(`#screen-${nextScreen}`);
+  const title = section.dataset.title;
+  document.querySelector('#current-page').textContent = title;
+  document.title = `${title} · Advanced Studies CRM`;
+  if (location.hash !== `#${nextScreen}`) history.replaceState(null, '', `#${nextScreen}`);
 }
 
 function renderContacts() {
-  const query = searchInput.value.trim().toLowerCase();
-  const visible = allContacts.filter((person) => {
-    const matchesSearch = `${person.name} ${person.email} ${person.phone} ${person.id}`.toLowerCase().includes(query);
-    return matchesSearch && (!householdOnly || person.household_name);
+  const search = searchInput.value.trim().toLocaleLowerCase();
+  const matching = contacts.filter((contact) => {
+    const words = `${contact.id} ${contact.name} ${contact.email} ${contact.phone}`.toLocaleLowerCase();
+    return words.includes(search) && (!householdOnly || Boolean(contact.household_id));
   });
-  const displayed = showAll || query || householdOnly ? visible : visible.slice(0, 7);
-  document.querySelector('#showing-count').textContent = `Showing ${displayed.length} of ${visible.length} people`;
-  document.querySelector('#nav-contact-count').textContent = allContacts.length;
-  document.querySelector('#view-all').innerHTML = showAll ? 'Show less <span>↗</span>' : 'View all <span>↗</span>';
-  if (!displayed.length) {
-    rows.innerHTML = '<tr><td colspan="5" class="empty">No people match this search.</td></tr>';
+  document.querySelector('#showing-count').textContent = `Showing ${matching.length} of ${contacts.length} contacts`;
+  document.querySelector('#clear-search').hidden = !search;
+  document.querySelector('#filter-households').classList.toggle('active-filter', householdOnly);
+  document.querySelector('#filter-households span').textContent = householdOnly ? 'Households only' : 'All contacts';
+  if (!matching.length) {
+    rows.innerHTML = '<tr><td colspan="5" class="empty">No contacts found. Try another search.</td></tr>';
+    document.querySelector('#show-all').hidden = true;
     return;
   }
-  rows.innerHTML = displayed.map((person, index) => {
-    const type = person.tags.includes('member') ? 'Member' : 'Supporter';
-    const tagClass = type === 'Supporter' ? 'tag donor' : 'tag';
-    const household = person.household_name || '—';
-    const giving = Number(person.giving_total) ? money.format(person.giving_total) : '—';
-    return `<tr>
-      <td class="person-cell"><div class="person-info"><span class="person-avatar tone-${index % 4}">${initials(person.name)}</span><span class="person-meta">${person.name}<small>${person.email || person.id}</small></span></div></td>
-      <td class="household">${household}</td><td class="giving-amount">${giving}</td><td><span class="${tagClass}">${type}</span></td><td class="row-menu">···</td>
-    </tr>`;
-  }).join('');
+  rows.innerHTML = matching.map((contact) => `<tr>
+    <td class="id-cell">${escapeHtml(contact.id)}</td>
+    <td class="person-cell">${escapeHtml(contact.name)}</td>
+    <td>${escapeHtml(contact.email || '—')}</td>
+    <td>${escapeHtml(contact.household_name || '—')}</td>
+    <td><button class="open-contact" type="button" data-open-contact="${escapeHtml(contact.id)}">Open</button></td>
+  </tr>`).join('');
+  document.querySelector('#show-all').hidden = true;
 }
 
 async function loadContacts() {
   const response = await fetch('/api/contacts');
-  if (!response.ok) throw new Error('Could not load people.');
-  allContacts = await response.json();
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Could not load contacts.');
+  contacts = result;
   renderContacts();
+}
+
+async function loadHouseholdOptions() {
+  const response = await fetch('/api/households/options');
+  householdOptions = await response.json();
+  const select = document.querySelector('#contact-household');
+  select.innerHTML = '<option value="">No household</option>' + householdOptions.map((household) =>
+    `<option value="${escapeHtml(household.id)}">${escapeHtml(household.id)} · ${escapeHtml(household.name)}</option>`
+  ).join('');
 }
 
 async function loadOverview() {
   const response = await fetch('/api/overview');
-  if (!response.ok) throw new Error('Could not load the overview.');
   const data = await response.json();
-  document.querySelector('#test-date').textContent = `Demo date · ${dateFormat.format(new Date(`${data.testDate}T00:00:00`))}, ${data.testDate.slice(0, 4)}`;
-  document.querySelector('#metric-contacts').textContent = data.contactCount;
+  if (!response.ok) throw new Error(data.error || 'Could not load the dashboard.');
+  document.querySelector('#test-date').textContent = `Class data date · ${dateFormat.format(new Date(`${data.testDate}T00:00:00`))}`;
+  document.querySelector('#metric-contacts').textContent = data.activePeople;
   document.querySelector('#metric-members').textContent = data.activeMemberships;
   document.querySelector('#metric-giving').textContent = money.format(data.donationTotal);
-  document.querySelector('#metric-tasks').textContent = data.overdueTasks;
   document.querySelector('#gift-count').textContent = `${data.donationCount} recorded gifts`;
-  document.querySelector('#recent-gifts').innerHTML = data.recentDonations.map((gift, index) => `
-    <div class="gift-row"><span class="gift-avatar">${index % 2 ? '↗' : '♡'}</span>
-      <span class="gift-details"><strong>${gift.contact_name}</strong><small>${gift.campaign} · ${dateFormat.format(new Date(`${gift.date}T00:00:00`))}</small></span>
-      <span class="gift-amount">${money.format(gift.amount)}</span></div>`).join('');
+  document.querySelector('#metric-renewals').textContent = data.renewalsDue;
+  document.querySelector('#metric-tasks').textContent = data.overdueTasks;
+}
+
+async function openContact(contactId) {
+  selectedContactId = contactId;
+  const response = await fetch(`/api/contacts/${encodeURIComponent(contactId)}`);
+  const contact = await response.json();
+  if (!response.ok) {
+    document.querySelector('#contact-detail-card').innerHTML = `<p class="empty">${escapeHtml(contact.error)}</p>`;
+    setScreen('contact-details');
+    return;
+  }
+  const details = [
+    ['Contact ID', contact.id], ['Name', contact.name], ['Email', contact.email || '—'],
+    ['Phone', contact.phone || '—'], ['Household', contact.household_name ? `${contact.household_id} · ${contact.household_name}` : '—'],
+    ['Tags', contact.tags.length ? contact.tags.join(', ') : '—'], ['Notes', contact.notes || '—'],
+    ['Email permission', contact.email_opt_in ? 'Granted' : 'Not granted']
+  ];
+  document.querySelector('#detail-subhead').textContent = `${contact.name} · ${contact.id}`;
+  document.querySelector('#contact-detail-card').innerHTML = `
+    <dl class="detail-grid">${details.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+    <section class="linked-records"><h2>Linked records</h2><p>Memberships: ${contact.memberships.length ? contact.memberships.length : 'none saved yet'}</p><p>Donations: ${contact.donations.length ? contact.donations.length : 'none saved yet'}</p><p>Tasks: ${contact.tasks.length ? contact.tasks.length : 'none saved yet'}</p></section>`;
+  setScreen('contact-details');
 }
 
 function openDialog() {
-  document.querySelector('#form-message').textContent = '';
   form.reset();
+  document.querySelector('#form-message').textContent = '';
   dialog.showModal();
-  form.elements.name.focus();
+  document.querySelector('#contact-id').focus();
 }
 
 function closeDialog() {
   dialog.close();
 }
 
-document.querySelector('#new-contact').addEventListener('click', openDialog);
+async function refreshData() {
+  await Promise.all([loadContacts(), loadOverview()]);
+}
+
+function showError(error) {
+  const message = document.querySelector('#contact-message');
+  message.textContent = error.message;
+  message.hidden = false;
+}
+
+document.querySelectorAll('.nav-link').forEach((link) => {
+  link.addEventListener('click', () => setScreen(link.dataset.screen));
+});
+document.querySelectorAll('[data-screen-link]').forEach((button) => {
+  button.addEventListener('click', () => setScreen(button.dataset.screenLink));
+});
+window.addEventListener('hashchange', () => setScreen(location.hash.slice(1)));
+document.querySelectorAll('[data-add-contact]').forEach((button) => button.addEventListener('click', openDialog));
 document.querySelector('#close-dialog').addEventListener('click', closeDialog);
 document.querySelector('#cancel-contact').addEventListener('click', closeDialog);
-document.querySelector('#view-all').addEventListener('click', () => { showAll = !showAll; renderContacts(); });
-document.querySelector('#filter-button').addEventListener('click', (event) => {
+document.querySelector('#clear-search').addEventListener('click', () => {
+  searchInput.value = '';
+  renderContacts();
+  searchInput.focus();
+});
+document.querySelector('#filter-households').addEventListener('click', () => {
   householdOnly = !householdOnly;
-  event.currentTarget.classList.toggle('active-filter', householdOnly);
-  event.currentTarget.querySelector('span').textContent = householdOnly ? 'Households' : 'Filters';
   renderContacts();
 });
-searchInput.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(renderContacts, 100);
-});
-searchInput.addEventListener('keydown', (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-    event.preventDefault();
-    searchInput.focus();
-  }
+searchInput.addEventListener('input', renderContacts);
+rows.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-open-contact]');
+  if (button) openContact(button.dataset.openContact).catch(showError);
 });
 document.addEventListener('keydown', (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();
+    setScreen('contacts');
     searchInput.focus();
-  }
-});
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const message = document.querySelector('#form-message');
-  const values = Object.fromEntries(new FormData(form));
-  try {
-    const response = await fetch('/api/contacts', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values)
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Could not save this person.');
-    await loadContacts();
-    document.querySelector('#metric-contacts').textContent = allContacts.length;
-    closeDialog();
-    document.querySelector('#contacts').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (error) {
-    message.textContent = error.message;
   }
 });
 
-Promise.all([loadOverview(), loadContacts()]).catch((error) => {
-  rows.innerHTML = `<tr><td colspan="5" class="empty">${error.message} Refresh the page to try again.</td></tr>`;
-  document.querySelector('#recent-gifts').innerHTML = `<div class="empty">${error.message}</div>`;
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const formMessage = document.querySelector('#form-message');
+  formMessage.textContent = '';
+  const data = Object.fromEntries(new FormData(form));
+  data.email_opt_in = form.elements.email_opt_in.checked;
+  try {
+    const response = await fetch('/api/contacts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      formMessage.textContent = result.error || 'Could not save this contact.';
+      if (result.error === 'Enter a name.') document.querySelector('#contact-name').focus();
+      return;
+    }
+    closeDialog();
+    setScreen('contacts');
+    searchInput.value = '';
+    await refreshData();
+    const message = document.querySelector('#contact-message');
+    message.textContent = `Contact ${result.id} saved.`;
+    message.hidden = false;
+    document.querySelector('#contacts').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    formMessage.textContent = error.message;
+  }
+});
+
+setScreen(location.hash.slice(1) || 'dashboard');
+Promise.all([loadHouseholdOptions(), refreshData()]).catch((error) => {
+  document.querySelector('#contact-rows').innerHTML = `<tr><td colspan="5" class="empty">${escapeHtml(error.message)}</td></tr>`;
+  document.querySelector('#contact-message').textContent = error.message;
+  document.querySelector('#contact-message').hidden = false;
 });

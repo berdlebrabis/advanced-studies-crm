@@ -3,81 +3,91 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f6f6f2">
-  <title>Advanced Studies CRM</title>
+  <meta name="theme-color" content="#f6f7f3">
+  <title>Dashboard · Advanced Studies CRM</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
-      <a class="brand" href="/" aria-label="Advanced Studies home">
-        <span class="brand-mark">A</span>
+      <a class="brand" href="#dashboard" aria-label="Advanced Studies CRM dashboard">
+        <span class="brand-mark" aria-hidden="true">A</span>
         <span><strong>Advanced Studies</strong><small>COMMUNITY CRM</small></span>
       </a>
-      <div class="nav-label">WORKSPACE</div>
+      <p class="nav-label">WORKSPACE</p>
       <nav aria-label="Main navigation">
-        <a class="nav-link active" href="#overview"><span class="nav-icon">◫</span> Overview</a>
-        <a class="nav-link" href="#contacts"><span class="nav-icon">♧</span> People <span class="nav-count" id="nav-contact-count">—</span></a>
-        <a class="nav-link muted" href="#giving"><span class="nav-icon">♡</span> Giving</a>
-        <a class="nav-link muted" href="#memberships"><span class="nav-icon">▤</span> Memberships</a>
-        <a class="nav-link muted" href="#tasks"><span class="nav-icon">✓</span> Follow-ups</a>
+        <a class="nav-link" href="#dashboard" data-screen="dashboard"><span class="nav-icon" aria-hidden="true">◫</span>Dashboard</a>
+        <a class="nav-link" href="#contacts" data-screen="contacts"><span class="nav-icon" aria-hidden="true">♧</span>Contacts</a>
+        <a class="nav-link" href="#contact-details" data-screen="contact-details"><span class="nav-icon" aria-hidden="true">◉</span>Contact Details</a>
+        <a class="nav-link" href="#memberships" data-screen="memberships"><span class="nav-icon" aria-hidden="true">▤</span>Memberships</a>
+        <a class="nav-link" href="#donations" data-screen="donations"><span class="nav-icon" aria-hidden="true">♡</span>Donations</a>
+        <a class="nav-link" href="#tasks" data-screen="tasks"><span class="nav-icon" aria-hidden="true">✓</span>Tasks</a>
+        <a class="nav-link" href="#reports" data-screen="reports"><span class="nav-icon" aria-hidden="true">▥</span>Reports</a>
+        <a class="nav-link" href="#settings" data-screen="settings"><span class="nav-icon" aria-hidden="true">⚙</span>Login / Settings</a>
       </nav>
       <div class="sidebar-bottom">
-        <div class="demo-note"><span class="demo-dot"></span><div><strong>Classroom demo</strong><small>Sample records only</small></div></div>
-        <div class="user-card"><span class="avatar">AS</span><span><strong>Staff workspace</strong><small>Local preview</small></span><span class="more">···</span></div>
+        <div class="demo-note"><span class="demo-dot" aria-hidden="true"></span><div><strong>Classroom demo</strong><small>Fictional sample records</small></div></div>
+        <div class="user-card"><span class="avatar" aria-hidden="true">AS</span><span><strong>Staff workspace</strong><small>Local preview</small></span></div>
       </div>
     </aside>
 
-    <main id="overview" class="main">
+    <main class="main">
       <header class="topbar">
-        <div class="crumb">Workspace <span>/</span> Overview</div>
-        <div class="top-actions"><span class="date-chip" id="test-date">Loading date…</span><button class="icon-button" aria-label="Notifications">♧<i></i></button></div>
+        <div class="crumb">Workspace <span>/</span> <span id="current-page">Dashboard</span></div>
+        <div class="top-actions"><span class="date-chip" id="test-date">Demo records</span></div>
       </header>
-      <section class="welcome">
-        <div><p class="eyebrow">YOUR COMMUNITY, IN ONE PLACE</p><h1>Good morning.</h1><p class="subhead">A clear view of the people and support behind your mission.</p></div>
-        <button class="primary-button" id="new-contact"><span>＋</span> Add a person</button>
+
+      <section class="screen" id="screen-dashboard" data-title="Dashboard" hidden>
+        <div class="welcome"><div><p class="eyebrow">YOUR COMMUNITY, IN ONE PLACE</p><h1>Dashboard</h1><p class="subhead">A live view of saved contacts and activity.</p></div><button class="primary-button" data-add-contact><span aria-hidden="true">＋</span>Add Contact</button></div>
+        <section class="metrics" aria-label="Saved record totals">
+          <article class="metric-card"><div class="metric-top"><span>Contacts</span><span class="metric-icon lavender" aria-hidden="true">♧</span></div><strong id="metric-contacts">0</strong><small>saved contacts</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Memberships</span><span class="metric-icon mint" aria-hidden="true">▤</span></div><strong id="metric-members">0</strong><small>paid and current</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Donation total</span><span class="metric-icon peach" aria-hidden="true">♡</span></div><strong id="metric-giving">$0</strong><small id="gift-count">0 recorded gifts</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Renewals due</span><span class="metric-icon yellow" aria-hidden="true">◷</span></div><strong id="metric-renewals">0</strong><small>in the next 30 days</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Overdue tasks</span><span class="metric-icon yellow" aria-hidden="true">✓</span></div><strong id="metric-tasks">0</strong><small>open and past due</small></article>
+        </section>
+        <article class="panel dashboard-note"><p class="eyebrow">RECORDS</p><h2>Only saved records count here.</h2><p>Use Contacts to add people. Memberships, donations, and tasks will appear when those features are built.</p></article>
       </section>
 
-      <section class="metrics" aria-label="Organization overview">
-        <article class="metric-card"><div class="metric-top"><span>Active people</span><span class="metric-icon lavender">♧</span></div><strong id="metric-contacts">—</strong><small>in your community</small><div class="metric-line"><span style="width:74%"></span></div></article>
-        <article class="metric-card"><div class="metric-top"><span>Active memberships</span><span class="metric-icon mint">▤</span></div><strong id="metric-members">—</strong><small>paid and current</small><div class="metric-line mint-line"><span style="width:58%"></span></div></article>
-        <article class="metric-card"><div class="metric-top"><span>Giving to date</span><span class="metric-icon peach">♡</span></div><strong id="metric-giving">—</strong><small id="gift-count">across all gifts</small><div class="metric-line peach-line"><span style="width:67%"></span></div></article>
-        <article class="metric-card"><div class="metric-top"><span>Follow-ups due</span><span class="metric-icon yellow">◷</span></div><strong id="metric-tasks">—</strong><small>open and past due</small><div class="metric-line yellow-line"><span style="width:34%"></span></div></article>
-      </section>
-
-      <section class="content-grid">
-        <article class="panel people-panel" id="contacts">
-          <div class="panel-heading"><div><p class="eyebrow">PEOPLE & HOUSEHOLDS</p><h2>Your community</h2></div><button class="text-button" id="view-all">View all <span>↗</span></button></div>
-          <div class="table-toolbar"><label class="search-box"><span>⌕</span><input id="contact-search" type="search" placeholder="Search people…" autocomplete="off"><kbd>⌘ K</kbd></label><button class="filter-button" id="filter-button">☷ <span>Filters</span></button></div>
-          <div class="table-wrap"><table><thead><tr><th>NAME</th><th>HOUSEHOLD</th><th>GIVING</th><th>TYPE</th><th></th></tr></thead><tbody id="contact-rows"><tr><td colspan="5" class="loading">Loading people…</td></tr></tbody></table></div>
-          <div class="panel-foot"><span id="showing-count">Loading records</span><button class="pagination" aria-label="More records">↗</button></div>
+      <section class="screen" id="screen-contacts" data-title="Contacts" hidden>
+        <div class="page-heading"><div><p class="eyebrow">PEOPLE & HOUSEHOLDS</p><h1>Contacts</h1><p class="subhead">Search and open saved people.</p></div><button class="primary-button" data-add-contact><span aria-hidden="true">＋</span>Add Contact</button></div>
+        <article class="panel people-panel">
+          <div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="contact-search" type="search" placeholder="Search by name or contact ID" autocomplete="off"><button type="button" class="clear-search" id="clear-search" hidden>Clear</button></label><button class="filter-button" id="filter-households" type="button">☷ <span>All contacts</span></button></div>
+          <p class="inline-message" id="contact-message" role="status" aria-live="polite"></p>
+          <div class="table-wrap"><table><thead><tr><th>CONTACT ID</th><th>NAME</th><th>EMAIL</th><th>HOUSEHOLD</th><th>OPEN</th></tr></thead><tbody id="contact-rows"><tr><td colspan="5" class="loading">Loading contacts…</td></tr></tbody></table></div>
+          <div class="panel-foot"><span id="showing-count">Loading contacts</span><button class="pagination" id="show-all" type="button" hidden>Show all</button></div>
         </article>
-
-        <aside class="right-column">
-          <article class="panel giving-panel" id="giving">
-            <div class="panel-heading"><div><p class="eyebrow">LATEST SUPPORT</p><h2>Recent giving</h2></div><button class="round-arrow" aria-label="Open giving">↗</button></div>
-            <div id="recent-gifts" class="gift-list"><div class="loading">Loading gifts…</div></div>
-            <button class="wide-link" type="button">Giving overview <span>→</span></button>
-          </article>
-          <article class="mission-card">
-            <div class="mission-art"><span class="sun"></span><span class="hill hill-one"></span><span class="hill hill-two"></span><span class="little-star">✳</span></div>
-            <p class="eyebrow">A NOTE FOR YOUR TEAM</p><h3>Every connection<br>moves the mission.</h3><p>Keep relationships at the center of your work.</p>
-          </article>
-        </aside>
       </section>
-      <footer>Advanced Studies CRM <span>•</span> Demo data is fictional <span class="footer-right">Built for thoughtful community work</span></footer>
+
+      <section class="screen" id="screen-contact-details" data-title="Contact Details" hidden>
+        <div class="page-heading"><div><p class="eyebrow">PERSON RECORD</p><h1>Contact Details</h1><p class="subhead" id="detail-subhead">Open a person from Contacts to see their record.</p></div><button class="secondary-button" data-screen-link="contacts">← Back to Contacts</button></div>
+        <article class="panel details-panel" id="contact-detail-card"><p class="empty">Select a contact from the Contacts screen.</p></article>
+      </section>
+
+      <section class="screen placeholder-screen" id="screen-memberships" data-title="Memberships" hidden><p class="eyebrow">MEMBERSHIP RECORDS</p><h1>Memberships</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Plans, prices, payment status, and renewals will appear here after membership entry is built.</p></article></section>
+      <section class="screen placeholder-screen" id="screen-donations" data-title="Donations" hidden><p class="eyebrow">GIVING</p><h1>Donations</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Donation entry and saved gifts will appear here after donation entry is built.</p></article></section>
+      <section class="screen placeholder-screen" id="screen-tasks" data-title="Tasks" hidden><p class="eyebrow">FOLLOW-UP</p><h1>Tasks</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Contact tasks, owners, due dates, and completion will appear here after tasks are built.</p></article></section>
+      <section class="screen placeholder-screen" id="screen-reports" data-title="Reports" hidden><p class="eyebrow">SAVED RECORDS</p><h1>Reports</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Reports will use saved records only. No sample totals are shown here.</p></article></section>
+      <section class="screen placeholder-screen" id="screen-settings" data-title="Login / Settings" hidden><p class="eyebrow">WORKSPACE ACCESS</p><h1>Login / Settings</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Sign-in, users, access rules, import, and backup are not available yet.</p></article></section>
+
+      <footer>Advanced Studies CRM <span>•</span> Fictional classroom records <span class="footer-right">CRM 1 · Contact Starter</span></footer>
     </main>
   </div>
 
-  <dialog id="contact-dialog" class="contact-dialog">
-    <form id="contact-form" method="dialog">
-      <div class="dialog-top"><div><p class="eyebrow">ADD TO YOUR COMMUNITY</p><h2>New person</h2></div><button class="close-button" type="button" id="close-dialog" aria-label="Close">×</button></div>
-      <label>Name<input name="name" required placeholder="Full name"></label>
-      <label>Email<input name="email" type="email" placeholder="name@example.org"></label>
-      <label>Phone<input name="phone" type="tel" placeholder="(555) 000-0000"></label>
-      <p class="form-message" id="form-message" role="status"></p>
-      <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-contact">Cancel</button><button class="primary-button" type="submit">Save person</button></div>
+  <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-dialog-title">
+    <form id="contact-form" novalidate>
+      <div class="dialog-top"><div><p class="eyebrow">ADD TO YOUR COMMUNITY</p><h2 id="contact-dialog-title">Add Contact</h2></div><button class="close-button" type="button" id="close-dialog" aria-label="Close form">×</button></div>
+      <label for="contact-id">Contact ID</label><input id="contact-id" name="id" required autocomplete="off" placeholder="e.g. C101">
+      <label for="contact-name">Name</label><input id="contact-name" name="name" required autocomplete="name" placeholder="Full name">
+      <label for="contact-email">Email</label><input id="contact-email" name="email" type="email" autocomplete="email" placeholder="name@example.org">
+      <label for="contact-phone">Phone</label><input id="contact-phone" name="phone" type="tel" autocomplete="tel" placeholder="(555) 000-0000">
+      <label for="contact-household">Household</label><select id="contact-household" name="household_id"><option value="">No household</option></select>
+      <label for="contact-tags">Tags <span class="field-hint">comma separated</span></label><input id="contact-tags" name="tags" placeholder="member, donor">
+      <label for="contact-notes">Notes</label><textarea id="contact-notes" name="notes" rows="3" placeholder="Notes about this person"></textarea>
+      <label class="checkbox-label" for="contact-email-opt-in"><input id="contact-email-opt-in" name="email_opt_in" type="checkbox"><span>Email permission granted</span></label>
+      <p class="form-message" id="form-message" role="status" aria-live="polite"></p>
+      <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-contact">Cancel</button><button class="primary-button" type="submit">Save</button></div>
     </form>
   </dialog>
 </body>

@@ -5,7 +5,8 @@
   "description": "A small nonprofit CRM starter using classroom sample data.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/contacts.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
