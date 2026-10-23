@@ -4,14 +4,15 @@ A small local nonprofit CRM built with Node.js, Express, SQLite, and plain brows
 
 ## Start the app
 
-Install the dependencies, then run:
+Install the dependencies, then run in PowerShell:
 
-```sh
+```powershell
 npm install
+$env:PORT = 3001
 npm start
 ```
 
-Open <http://localhost:3000>. The app stores its local database at `data/crm.sqlite`. The supplied class JSON is reference data; only contacts entered in the app are saved.
+Open <http://localhost:3001>. Port 3000 is occupied by an older local CRM process in this workspace, so this working version uses 3001. The app stores its local database at `data/crm.sqlite`. The supplied class JSON is reference data; only contacts entered in the app are saved.
 
 ## Current scope
 
