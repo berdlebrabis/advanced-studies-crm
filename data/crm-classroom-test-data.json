@@ -1,0 +1,1077 @@
+{
+  "note": "Fake classroom records. Load only the sections needed for the current build. Map fields to your app. Seed records without creating automatic follow-up tasks; test those rules separately. Pending memberships are applications with no paid period.",
+  "test_date": "2026-10-15",
+  "demo_roles": [
+    {
+      "id": "admin-demo",
+      "role": "admin"
+    },
+    {
+      "id": "staff-demo",
+      "role": "staff"
+    },
+    {
+      "id": "viewer-demo",
+      "role": "viewer",
+      "export_allowed": false
+    }
+  ],
+  "households": [
+    {
+      "id": "H101",
+      "name": "Test household 1",
+      "contact_ids": [
+        "C101",
+        "C102"
+      ]
+    },
+    {
+      "id": "H102",
+      "name": "Test household 2",
+      "contact_ids": [
+        "C103",
+        "C104"
+      ]
+    },
+    {
+      "id": "H103",
+      "name": "Test household 3",
+      "contact_ids": [
+        "C105",
+        "C106"
+      ]
+    },
+    {
+      "id": "H104",
+      "name": "Test household 4",
+      "contact_ids": [
+        "C107",
+        "C108"
+      ]
+    },
+    {
+      "id": "H105",
+      "name": "Test household 5",
+      "contact_ids": [
+        "C109",
+        "C110"
+      ]
+    }
+  ],
+  "contacts": [
+    {
+      "id": "C101",
+      "name": "Alex Rivera",
+      "email": "person101@example.com",
+      "phone": "555-0101",
+      "household_id": "H101",
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C102",
+      "name": "Sam Lee",
+      "email": "person102@example.com",
+      "phone": "555-0102",
+      "household_id": "H101",
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C103",
+      "name": "Jordan Patel",
+      "email": "person103@example.com",
+      "phone": "555-0103",
+      "household_id": "H102",
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C104",
+      "name": "Casey Park",
+      "email": "person104@example.com",
+      "phone": "555-0104",
+      "household_id": "H102",
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C105",
+      "name": "Taylor Kim",
+      "email": "person105@example.com",
+      "phone": "555-0105",
+      "household_id": "H103",
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C106",
+      "name": "Morgan Chen",
+      "email": "person106@example.com",
+      "phone": "555-0106",
+      "household_id": "H103",
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C107",
+      "name": "Avery Ross",
+      "email": "person107@example.com",
+      "phone": "555-0107",
+      "household_id": "H104",
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C108",
+      "name": "Riley Stone",
+      "email": "person108@example.com",
+      "phone": "555-0108",
+      "household_id": "H104",
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C109",
+      "name": "Jamie Cruz",
+      "email": "person109@example.com",
+      "phone": "555-0109",
+      "household_id": "H105",
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C110",
+      "name": "Drew Hall",
+      "email": "person110@example.com",
+      "phone": "555-0110",
+      "household_id": "H105",
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C111",
+      "name": "Alex Rivera 2",
+      "email": "person111@example.com",
+      "phone": "555-0111",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C112",
+      "name": "Sam Lee 2",
+      "email": "person112@example.com",
+      "phone": "555-0112",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C113",
+      "name": "Jordan Patel 2",
+      "email": "person113@example.com",
+      "phone": "555-0113",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C114",
+      "name": "Casey Park 2",
+      "email": "person114@example.com",
+      "phone": "555-0114",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C115",
+      "name": "Taylor Kim 2",
+      "email": "person115@example.com",
+      "phone": "555-0115",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C116",
+      "name": "Morgan Chen 2",
+      "email": "person116@example.com",
+      "phone": "555-0116",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C117",
+      "name": "Avery Ross 2",
+      "email": "person117@example.com",
+      "phone": "555-0117",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C118",
+      "name": "Riley Stone 2",
+      "email": "person118@example.com",
+      "phone": "555-0118",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C119",
+      "name": "Jamie Cruz 2",
+      "email": "person119@example.com",
+      "phone": "555-0119",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C120",
+      "name": "Drew Hall 2",
+      "email": "person120@example.com",
+      "phone": "555-0120",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C121",
+      "name": "Alex Rivera 3",
+      "email": "person121@example.com",
+      "phone": "555-0121",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C122",
+      "name": "Sam Lee 3",
+      "email": "person122@example.com",
+      "phone": "555-0122",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C123",
+      "name": "Jordan Patel 3",
+      "email": "person123@example.com",
+      "phone": "555-0123",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C124",
+      "name": "Casey Park 3",
+      "email": "person124@example.com",
+      "phone": "555-0124",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C125",
+      "name": "Taylor Kim 3",
+      "email": "person125@example.com",
+      "phone": "555-0125",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C126",
+      "name": "Morgan Chen 3",
+      "email": "person126@example.com",
+      "phone": "555-0126",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C127",
+      "name": "Avery Ross 3",
+      "email": "person127@example.com",
+      "phone": "555-0127",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C128",
+      "name": "Riley Stone 3",
+      "email": "person128@example.com",
+      "phone": "555-0128",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    },
+    {
+      "id": "C129",
+      "name": "Jamie Cruz 3",
+      "email": "person129@example.com",
+      "phone": "555-0129",
+      "household_id": null,
+      "tags": [
+        "member"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": true,
+      "archived": false
+    },
+    {
+      "id": "C130",
+      "name": "Drew Hall 3",
+      "email": "person130@example.com",
+      "phone": "555-0130",
+      "household_id": null,
+      "tags": [
+        "donor"
+      ],
+      "notes": "Fake classroom contact",
+      "email_opt_in": false,
+      "archived": false
+    }
+  ],
+  "memberships": [
+    {
+      "id": "M101",
+      "contact_id": "C101",
+      "household_id": "H101",
+      "plan": "family",
+      "price": 40,
+      "start_date": "2025-10-31",
+      "end_date": "2026-10-31",
+      "payment_status": "paid",
+      "payment_code": "MEM-101"
+    },
+    {
+      "id": "M102",
+      "contact_id": "C103",
+      "household_id": "H102",
+      "plan": "family",
+      "price": 40,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-102"
+    },
+    {
+      "id": "M103",
+      "contact_id": "C105",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-16",
+      "end_date": "2026-10-16",
+      "payment_status": "paid",
+      "payment_code": "MEM-103"
+    },
+    {
+      "id": "M104",
+      "contact_id": "C106",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-17",
+      "end_date": "2026-10-17",
+      "payment_status": "paid",
+      "payment_code": "MEM-104"
+    },
+    {
+      "id": "M105",
+      "contact_id": "C107",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-11-01",
+      "end_date": "2026-11-01",
+      "payment_status": "paid",
+      "payment_code": "MEM-105"
+    },
+    {
+      "id": "M106",
+      "contact_id": "C108",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-11-10",
+      "end_date": "2026-11-10",
+      "payment_status": "paid",
+      "payment_code": "MEM-106"
+    },
+    {
+      "id": "M107",
+      "contact_id": "C109",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-11-14",
+      "end_date": "2026-11-14",
+      "payment_status": "paid",
+      "payment_code": "MEM-107"
+    },
+    {
+      "id": "M108",
+      "contact_id": "C110",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-108"
+    },
+    {
+      "id": "M109",
+      "contact_id": "C111",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-109"
+    },
+    {
+      "id": "M110",
+      "contact_id": "C112",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-110"
+    },
+    {
+      "id": "M111",
+      "contact_id": "C113",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-111"
+    },
+    {
+      "id": "M112",
+      "contact_id": "C114",
+      "household_id": null,
+      "plan": "student_senior",
+      "price": 30,
+      "start_date": "2026-10-15",
+      "end_date": "2027-10-15",
+      "payment_status": "paid",
+      "payment_code": "MEM-112"
+    },
+    {
+      "id": "M113",
+      "contact_id": "C115",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-01",
+      "end_date": "2026-10-01",
+      "payment_status": "paid",
+      "payment_code": "MEM-113"
+    },
+    {
+      "id": "M114",
+      "contact_id": "C116",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-01",
+      "end_date": "2026-10-01",
+      "payment_status": "paid",
+      "payment_code": "MEM-114"
+    },
+    {
+      "id": "M115",
+      "contact_id": "C117",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-01",
+      "end_date": "2026-10-01",
+      "payment_status": "paid",
+      "payment_code": "MEM-115"
+    },
+    {
+      "id": "M116",
+      "contact_id": "C118",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": "2025-10-01",
+      "end_date": "2026-10-01",
+      "payment_status": "paid",
+      "payment_code": "MEM-116"
+    },
+    {
+      "id": "M117",
+      "contact_id": "C119",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": null,
+      "end_date": null,
+      "payment_status": "pending",
+      "payment_code": "MEM-117"
+    },
+    {
+      "id": "M118",
+      "contact_id": "C120",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": null,
+      "end_date": null,
+      "payment_status": "pending",
+      "payment_code": "MEM-118"
+    },
+    {
+      "id": "M119",
+      "contact_id": "C121",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": null,
+      "end_date": null,
+      "payment_status": "pending",
+      "payment_code": "MEM-119"
+    },
+    {
+      "id": "M120",
+      "contact_id": "C122",
+      "household_id": null,
+      "plan": "individual",
+      "price": 35,
+      "start_date": null,
+      "end_date": null,
+      "payment_status": "pending",
+      "payment_code": "MEM-120"
+    }
+  ],
+  "donations": [
+    {
+      "id": "D001",
+      "contact_id": "C101",
+      "amount": 50,
+      "date": "2026-10-01",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-001",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D002",
+      "contact_id": "C101",
+      "amount": 25,
+      "date": "2026-10-02",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-002",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D003",
+      "contact_id": "C102",
+      "amount": 10,
+      "date": "2026-10-03",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-003",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D004",
+      "contact_id": "C103",
+      "amount": 10,
+      "date": "2026-10-04",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-004",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D005",
+      "contact_id": "C104",
+      "amount": 10,
+      "date": "2026-10-05",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-005",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D006",
+      "contact_id": "C105",
+      "amount": 10,
+      "date": "2026-10-06",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-006",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D007",
+      "contact_id": "C106",
+      "amount": 10,
+      "date": "2026-10-07",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-007",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D008",
+      "contact_id": "C107",
+      "amount": 10,
+      "date": "2026-10-08",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-008",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D009",
+      "contact_id": "C108",
+      "amount": 10,
+      "date": "2026-10-09",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-009",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D010",
+      "contact_id": "C109",
+      "amount": 10,
+      "date": "2026-10-10",
+      "campaign": "Campaign A",
+      "method": "fake cash",
+      "payment_code": "DON-010",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D011",
+      "contact_id": "C111",
+      "amount": 20,
+      "date": "2026-10-01",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-011",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D012",
+      "contact_id": "C112",
+      "amount": 20,
+      "date": "2026-10-02",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-012",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D013",
+      "contact_id": "C113",
+      "amount": 20,
+      "date": "2026-10-03",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-013",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D014",
+      "contact_id": "C114",
+      "amount": 20,
+      "date": "2026-10-04",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-014",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D015",
+      "contact_id": "C115",
+      "amount": 20,
+      "date": "2026-10-05",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-015",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D016",
+      "contact_id": "C116",
+      "amount": 20,
+      "date": "2026-10-06",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-016",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D017",
+      "contact_id": "C117",
+      "amount": 20,
+      "date": "2026-10-07",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-017",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D018",
+      "contact_id": "C118",
+      "amount": 20,
+      "date": "2026-10-08",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-018",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D019",
+      "contact_id": "C119",
+      "amount": 20,
+      "date": "2026-10-09",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-019",
+      "thank_you_sent": false,
+      "voided": false
+    },
+    {
+      "id": "D020",
+      "contact_id": "C120",
+      "amount": 20,
+      "date": "2026-10-10",
+      "campaign": "Campaign B",
+      "method": "fake cash",
+      "payment_code": "DON-020",
+      "thank_you_sent": false,
+      "voided": false
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T001",
+      "contact_id": "C101",
+      "type": "manual",
+      "title": "Manual test task 1",
+      "owner": "staff-demo",
+      "due_date": "2026-10-01",
+      "status": "complete"
+    },
+    {
+      "id": "T002",
+      "contact_id": "C102",
+      "type": "manual",
+      "title": "Manual test task 2",
+      "owner": "staff-demo",
+      "due_date": "2026-10-01",
+      "status": "complete"
+    },
+    {
+      "id": "T003",
+      "contact_id": "C103",
+      "type": "manual",
+      "title": "Manual test task 3",
+      "owner": "staff-demo",
+      "due_date": "2026-10-01",
+      "status": "complete"
+    },
+    {
+      "id": "T004",
+      "contact_id": "C104",
+      "type": "manual",
+      "title": "Manual test task 4",
+      "owner": "staff-demo",
+      "due_date": "2026-10-01",
+      "status": "complete"
+    },
+    {
+      "id": "T005",
+      "contact_id": "C105",
+      "type": "manual",
+      "title": "Manual test task 5",
+      "owner": "staff-demo",
+      "due_date": "2026-10-01",
+      "status": "complete"
+    },
+    {
+      "id": "T006",
+      "contact_id": "C106",
+      "type": "manual",
+      "title": "Manual test task 6",
+      "owner": "staff-demo",
+      "due_date": "2026-10-08",
+      "status": "open"
+    },
+    {
+      "id": "T007",
+      "contact_id": "C107",
+      "type": "manual",
+      "title": "Manual test task 7",
+      "owner": "staff-demo",
+      "due_date": "2026-10-09",
+      "status": "open"
+    },
+    {
+      "id": "T008",
+      "contact_id": "C108",
+      "type": "manual",
+      "title": "Manual test task 8",
+      "owner": "staff-demo",
+      "due_date": "2026-10-10",
+      "status": "open"
+    },
+    {
+      "id": "T009",
+      "contact_id": "C109",
+      "type": "manual",
+      "title": "Manual test task 9",
+      "owner": "staff-demo",
+      "due_date": "2026-10-11",
+      "status": "open"
+    },
+    {
+      "id": "T010",
+      "contact_id": "C110",
+      "type": "manual",
+      "title": "Manual test task 10",
+      "owner": "staff-demo",
+      "due_date": "2026-10-12",
+      "status": "open"
+    },
+    {
+      "id": "T011",
+      "contact_id": "C111",
+      "type": "manual",
+      "title": "Manual test task 11",
+      "owner": "staff-demo",
+      "due_date": "2026-10-13",
+      "status": "open"
+    },
+    {
+      "id": "T012",
+      "contact_id": "C112",
+      "type": "manual",
+      "title": "Manual test task 12",
+      "owner": "staff-demo",
+      "due_date": "2026-10-15",
+      "status": "open"
+    },
+    {
+      "id": "T013",
+      "contact_id": "C113",
+      "type": "manual",
+      "title": "Manual test task 13",
+      "owner": "staff-demo",
+      "due_date": "2026-10-16",
+      "status": "open"
+    },
+    {
+      "id": "T014",
+      "contact_id": "C114",
+      "type": "manual",
+      "title": "Manual test task 14",
+      "owner": "staff-demo",
+      "due_date": "2026-10-17",
+      "status": "open"
+    },
+    {
+      "id": "T015",
+      "contact_id": "C115",
+      "type": "manual",
+      "title": "Manual test task 15",
+      "owner": "staff-demo",
+      "due_date": "2026-10-18",
+      "status": "open"
+    }
+  ],
+  "expected_before_changes": {
+    "contacts": 30,
+    "households": 5,
+    "membership_records": 20,
+    "active_memberships": 12,
+    "expiring_memberships": 6,
+    "expired_memberships": 4,
+    "pending_applications": 4,
+    "active_covered_people": 14,
+    "donation_records": 20,
+    "donation_total": 355,
+    "campaign_a_total": 155,
+    "campaign_b_total": 200,
+    "manual_tasks": 15,
+    "completed_manual_tasks": 5,
+    "open_manual_tasks": 10,
+    "overdue_manual_tasks": 6
+  },
+  "expected_after_void_d002": {
+    "donation_records": 20,
+    "nonvoid_donations": 19,
+    "donation_total": 330,
+    "campaign_a_total": 130,
+    "campaign_b_total": 200,
+    "c101_nonvoid_total": 50
+  },
+  "expected_after_archive_c130": {
+    "saved_contact_records": 30,
+    "active_contact_rows": 29,
+    "archived_contact_rows": 1
+  },
+  "expected_after_paid_new_individual_c130": {
+    "active_memberships": 13,
+    "active_covered_people": 15,
+    "expiring_memberships": 6
+  },
+  "expected_after_paid_early_renewal_m101": {
+    "active_memberships": 12,
+    "active_covered_people": 14,
+    "expiring_memberships": 5,
+    "new_period_start": "2026-10-31",
+    "new_period_end": "2027-10-31"
+  }
+}

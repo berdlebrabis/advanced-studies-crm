@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f6f2">
+  <title>Advanced Studies CRM</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Advanced Studies home">
+        <span class="brand-mark">A</span>
+        <span><strong>Advanced Studies</strong><small>COMMUNITY CRM</small></span>
+      </a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <a class="nav-link active" href="#overview"><span class="nav-icon">◫</span> Overview</a>
+        <a class="nav-link" href="#contacts"><span class="nav-icon">♧</span> People <span class="nav-count" id="nav-contact-count">—</span></a>
+        <a class="nav-link muted" href="#giving"><span class="nav-icon">♡</span> Giving</a>
+        <a class="nav-link muted" href="#memberships"><span class="nav-icon">▤</span> Memberships</a>
+        <a class="nav-link muted" href="#tasks"><span class="nav-icon">✓</span> Follow-ups</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="demo-note"><span class="demo-dot"></span><div><strong>Classroom demo</strong><small>Sample records only</small></div></div>
+        <div class="user-card"><span class="avatar">AS</span><span><strong>Staff workspace</strong><small>Local preview</small></span><span class="more">···</span></div>
+      </div>
+    </aside>
+
+    <main id="overview" class="main">
+      <header class="topbar">
+        <div class="crumb">Workspace <span>/</span> Overview</div>
+        <div class="top-actions"><span class="date-chip" id="test-date">Loading date…</span><button class="icon-button" aria-label="Notifications">♧<i></i></button></div>
+      </header>
+      <section class="welcome">
+        <div><p class="eyebrow">YOUR COMMUNITY, IN ONE PLACE</p><h1>Good morning.</h1><p class="subhead">A clear view of the people and support behind your mission.</p></div>
+        <button class="primary-button" id="new-contact"><span>＋</span> Add a person</button>
+      </section>
+
+      <section class="metrics" aria-label="Organization overview">
+        <article class="metric-card"><div class="metric-top"><span>Active people</span><span class="metric-icon lavender">♧</span></div><strong id="metric-contacts">—</strong><small>in your community</small><div class="metric-line"><span style="width:74%"></span></div></article>
+        <article class="metric-card"><div class="metric-top"><span>Active memberships</span><span class="metric-icon mint">▤</span></div><strong id="metric-members">—</strong><small>paid and current</small><div class="metric-line mint-line"><span style="width:58%"></span></div></article>
+        <article class="metric-card"><div class="metric-top"><span>Giving to date</span><span class="metric-icon peach">♡</span></div><strong id="metric-giving">—</strong><small id="gift-count">across all gifts</small><div class="metric-line peach-line"><span style="width:67%"></span></div></article>
+        <article class="metric-card"><div class="metric-top"><span>Follow-ups due</span><span class="metric-icon yellow">◷</span></div><strong id="metric-tasks">—</strong><small>open and past due</small><div class="metric-line yellow-line"><span style="width:34%"></span></div></article>
+      </section>
+
+      <section class="content-grid">
+        <article class="panel people-panel" id="contacts">
+          <div class="panel-heading"><div><p class="eyebrow">PEOPLE & HOUSEHOLDS</p><h2>Your community</h2></div><button class="text-button" id="view-all">View all <span>↗</span></button></div>
+          <div class="table-toolbar"><label class="search-box"><span>⌕</span><input id="contact-search" type="search" placeholder="Search people…" autocomplete="off"><kbd>⌘ K</kbd></label><button class="filter-button" id="filter-button">☷ <span>Filters</span></button></div>
+          <div class="table-wrap"><table><thead><tr><th>NAME</th><th>HOUSEHOLD</th><th>GIVING</th><th>TYPE</th><th></th></tr></thead><tbody id="contact-rows"><tr><td colspan="5" class="loading">Loading people…</td></tr></tbody></table></div>
+          <div class="panel-foot"><span id="showing-count">Loading records</span><button class="pagination" aria-label="More records">↗</button></div>
+        </article>
+
+        <aside class="right-column">
+          <article class="panel giving-panel" id="giving">
+            <div class="panel-heading"><div><p class="eyebrow">LATEST SUPPORT</p><h2>Recent giving</h2></div><button class="round-arrow" aria-label="Open giving">↗</button></div>
+            <div id="recent-gifts" class="gift-list"><div class="loading">Loading gifts…</div></div>
+            <button class="wide-link" type="button">Giving overview <span>→</span></button>
+          </article>
+          <article class="mission-card">
+            <div class="mission-art"><span class="sun"></span><span class="hill hill-one"></span><span class="hill hill-two"></span><span class="little-star">✳</span></div>
+            <p class="eyebrow">A NOTE FOR YOUR TEAM</p><h3>Every connection<br>moves the mission.</h3><p>Keep relationships at the center of your work.</p>
+          </article>
+        </aside>
+      </section>
+      <footer>Advanced Studies CRM <span>•</span> Demo data is fictional <span class="footer-right">Built for thoughtful community work</span></footer>
+    </main>
+  </div>
+
+  <dialog id="contact-dialog" class="contact-dialog">
+    <form id="contact-form" method="dialog">
+      <div class="dialog-top"><div><p class="eyebrow">ADD TO YOUR COMMUNITY</p><h2>New person</h2></div><button class="close-button" type="button" id="close-dialog" aria-label="Close">×</button></div>
+      <label>Name<input name="name" required placeholder="Full name"></label>
+      <label>Email<input name="email" type="email" placeholder="name@example.org"></label>
+      <label>Phone<input name="phone" type="tel" placeholder="(555) 000-0000"></label>
+      <p class="form-message" id="form-message" role="status"></p>
+      <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-contact">Cancel</button><button class="primary-button" type="submit">Save person</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
