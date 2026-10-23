@@ -71,3 +71,41 @@ test('contact form errors are announced assertively to assistive technology', ()
   const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'index.html'), 'utf8');
   assert.match(html, /id="form-message" role="alert" aria-live="assertive" aria-atomic="true"/);
 });
+
+test('the eight menu destinations match titled screens and unfinished screens stay honest', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const appJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const links = [...html.matchAll(/<a class="nav-link" href="#([^"]+)" data-screen="([^"]+)">([\s\S]*?)<\/a>/g)];
+  assert.equal(links.length, 8);
+  const screenTitles = {
+    dashboard: 'Dashboard', contacts: 'Contacts', 'contact-details': 'Contact Details',
+    memberships: 'Memberships', donations: 'Donations', tasks: 'Tasks',
+    reports: 'Reports', settings: 'Login / Settings'
+  };
+  for (const [, hash, screen] of links) {
+    assert.equal(hash, screen);
+    assert.ok(screenTitles[screen]);
+    assert.ok(html.includes(`id="screen-${screen}" data-title="${screenTitles[screen]}"`));
+  }
+  assert.match(appJs, /link\.addEventListener\('click',\s*\(\)\s*=>\s*setScreen\(link\.dataset\.screen\)\)/);
+  for (const screen of ['memberships', 'donations', 'tasks', 'reports', 'settings']) {
+    const section = html.match(new RegExp(`<section class="screen placeholder-screen" id="screen-${screen}"[\\s\\S]*?<\\/section>`))?.[0] ?? '';
+    assert.match(section, /Not built yet/);
+  }
+  assert.match(html, /No sample totals are shown here/);
+});
+
+test('every contact form control has a visible label and keyboard focus styling', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  const controls = ['contact-id', 'contact-name', 'contact-email', 'contact-phone',
+    'contact-household', 'contact-tags', 'contact-notes', 'contact-email-opt-in'];
+  for (const id of controls) assert.match(html, new RegExp(`<label[^>]*for="${id}"`));
+  assert.match(html, /<button[^>]*id="cancel-contact"[^>]*>Cancel<\/button>/);
+  assert.match(html, /<button[^>]*type="submit"[^>]*>Save<\/button>/);
+  assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*3px solid/);
+});

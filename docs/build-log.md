@@ -1,24 +1,31 @@
-# Build Log — CRM 1: Contact Starter
+# CRM 1 — Contact Starter build log
 
-## First tested checkpoint
+**Build label:** CRM 1 — Contact Starter
+**Last updated:** 2026-10-22
+**Current tested code:** [Validation announcement improvement — `7199dc8`](https://github.com/berdlebrabis/advanced-studies-crm/commit/7199dc8936a43c530eeaf01c72502f7e1cc55e0f)
+**Current evidence checkpoint:** see the final commit URL recorded after this build.
 
-- Completed the eight screen sketches and the join, renew, and donate flow diagram in `docs/screens/`.
-- Added an eight-link menu. Every route has a distinct title and unfinished features say “Not built yet”; no made-up membership or donation totals are shown.
-- Built contact entry, SQLite persistence, case-insensitive search, contact details, and visible keyboard focus.
-- Manual check: entered C101–C105 using the classroom reference, compared their saved fields, refreshed, and confirmed the five records remained. Alex and ALEX both found C101; Nobody returned no contacts. Blank and spaces-only names were rejected; a valid sixth test contact saved once. The database was returned to five records.
-- Checkpoint: [First tested Contact Starter](https://github.com/berdlebrabis/advanced-studies-crm/commit/5bf4ee674484812c2e8637682bcf9ef8dbc41986)
+## 2026-10-22 — First running version
 
-## Improvement: validation announcement
+- **Work:** Eight screen sketches and three job flows; eight-link menu and titled screens; contact form, search, details, SQLite persistence, clear unfinished states, and keyboard-visible focus.
+- **Test:** Opened each menu link and confirmed its title. Entered C101–C105 through the form once each, compared saved detail fields with the class JSON, refreshed, and confirmed five remained. Alex and ALEX found C101; Nobody produced the no-results message. Blank and spaces-only names were rejected with the count at five; a valid C900 save produced six. Reset and re-entered C101–C105.
+- **Checkpoint:** [First tested Contact Starter](https://github.com/berdlebrabis/advanced-studies-crm/commit/5bf4ee674484812c2e8637682bcf9ef8dbc41986)
 
-- Problem: The form showed a blank-name error visually, but its polite announcement could be delayed for assistive technology.
-- Change: The error uses an assertive alert with atomic announcement semantics.
-- Retest: The browser showed “Enter a name.” and focused the Name field while the five-record count stayed unchanged. The automated suite checks direct blank-name requests, count preservation, and the alert markup.
-- Checkpoint: [Improved validation announcement](https://github.com/berdlebrabis/advanced-studies-crm/commit/7199dc8936a43c530eeaf01c72502f7e1cc55e0f)
+## 2026-10-22 — Validation announcement improvement
 
-## Run and login
+- **Problem:** The blank-name error was visually present but in a polite live region that could be delayed by assistive technology.
+- **Change:** `#form-message` became an atomic assertive alert.
+- **Retest:** Blank-name submission again announced “Enter a name.”, focused Name, and kept the five-record count unchanged. Automated API checks reject both blank and spaces-only names without creating records or households.
+- **Checkpoint:** [Improved validation announcement](https://github.com/berdlebrabis/advanced-studies-crm/commit/7199dc8936a43c530eeaf01c72502f7e1cc55e0f)
 
-Run `npm install`, then in PowerShell set `$env:PORT = 3001` and run `npm start`. Open <http://localhost:3001>. Login/settings are not implemented, so there are no demo credentials.
+## 2026-10-22 — Evidence and accessibility verification
 
-## Current verification
+- **Test:** Verified all eight screen titles and selected states using keyboard Enter; Tab moved across form fields and buttons with a 3px solid focus outline. Space on Save with a blank name announced the validation error and left five contacts. Enter on Cancel closed the dialog without saving.
+- **Automated:** Seven Node tests pass. Captured output is `tests/crm1-test-output.txt`; test source is `test/contacts.test.js`.
+- **Failures, fixes, and retests:** A loopback `EACCES` blocked the first API test run; after granting local test access, all API tests passed. A menu test initially counted decorative icon text in the screen title; the assertion was corrected to compare each route to its `data-title`, then passed. SVG validation found an unescaped ampersand in Login / Settings; it was changed to `&amp;` and all nine SVG files passed parsing.
 
-The latest automated test output is recorded in `tests/crm1-test-output.txt`; the acceptance checklist is in `tests/crm1-tests.md`.
+## Current run instructions and unfinished work
+
+Use PowerShell: `npm install`, `$env:PORT = 3001`, then `npm start`. Open <http://localhost:3001>. Run `npm test` for the automated suite. Login/settings are not implemented, so no demo credentials exist. Memberships, donations, tasks, and reports are still marked “Not built yet.” Next build memberships/renewals, donations, then tasks/reports/export and login/settings.
+
+See `tests/crm1-tests.md` for the task-by-task starting data, steps, expected and actual results, and commit links. The demo-video URL remains outstanding because no recording URL is available.
