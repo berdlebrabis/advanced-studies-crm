@@ -66,7 +66,7 @@ All five records have the reference note “Fake classroom contact.” The visib
 
 ## Automated tests and preserved failures
 
-Real Node.js test code is in `test/contacts.test.js`; it uses `node:test`, an in-memory SQLite database, and Express API requests. It checks case-insensitive/no-match search, invalid and valid saves, duplicate IDs, assertive form errors, all eight menu-to-title mappings, honest unfinished screens, visible form labels, and keyboard focus styling. The captured run is in `tests/crm1-test-output.txt`.
+Real Node.js test code is in `test/contacts.test.js`; it uses `node:test`, an in-memory SQLite database, and Express API requests. It checks case-insensitive/no-match search, invalid and valid saves, duplicate IDs, assertive form errors, all eight menu-to-title mappings, honest unfinished screens, visible form labels, and keyboard focus styling. The captured run is in `tests/crm1-test-output.txt`. [Expanded test/evidence checkpoint](https://github.com/berdlebrabis/advanced-studies-crm/commit/fa4f2ee7539367b6c6964cff505583fdd956b141).
 
 - Initial run: four API tests were blocked by local loopback `EACCES` before reaching Express. After loopback permission was available, rerun passed; this was an environment restriction, not an app failure.
 - New menu assertion: first version mistakenly included decorative icon text in the expected heading. Corrected the test to compare the screen/title mapping; rerun passed.

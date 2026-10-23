@@ -3,7 +3,7 @@
 **Build label:** CRM 1 — Contact Starter
 **Last updated:** 2026-10-22
 **Current tested code:** [Validation announcement improvement — `7199dc8`](https://github.com/berdlebrabis/advanced-studies-crm/commit/7199dc8936a43c530eeaf01c72502f7e1cc55e0f)
-**Current evidence checkpoint:** see the final commit URL recorded after this build.
+**Expanded task evidence and test checkpoint:** [Commit `fa4f2ee`](https://github.com/berdlebrabis/advanced-studies-crm/commit/fa4f2ee7539367b6c6964cff505583fdd956b141)
 
 ## 2026-10-22 — First running version
 
@@ -21,7 +21,7 @@
 ## 2026-10-22 — Evidence and accessibility verification
 
 - **Test:** Verified all eight screen titles and selected states using keyboard Enter; Tab moved across form fields and buttons with a 3px solid focus outline. Space on Save with a blank name announced the validation error and left five contacts. Enter on Cancel closed the dialog without saving.
-- **Automated:** Seven Node tests pass. Captured output is `tests/crm1-test-output.txt`; test source is `test/contacts.test.js`.
+- **Automated:** Seven Node tests pass. Captured output is `tests/crm1-test-output.txt`; test source is `test/contacts.test.js`. [Evidence and test checkpoint](https://github.com/berdlebrabis/advanced-studies-crm/commit/fa4f2ee7539367b6c6964cff505583fdd956b141).
 - **Failures, fixes, and retests:** A loopback `EACCES` blocked the first API test run; after granting local test access, all API tests passed. A menu test initially counted decorative icon text in the screen title; the assertion was corrected to compare each route to its `data-title`, then passed. SVG validation found an unescaped ampersand in Login / Settings; it was changed to `&amp;` and all nine SVG files passed parsing.
 
 ## Current run instructions and unfinished work
