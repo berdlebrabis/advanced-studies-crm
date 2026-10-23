@@ -1,0 +1,6 @@
+node_modules/
+.npm-cache/
+tools/
+data/crm.sqlite
+data/crm.sqlite-shm
+data/crm.sqlite-wal
