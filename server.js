@@ -1023,6 +1023,26 @@ function createApp(db) {
   app.get('/api/export/contacts.csv', requireAuth, (req, res) => exportContacts(req, res, false));
   app.get('/api/export/email-list.csv', requireAuth, (req, res) => exportContacts(req, res, true));
 
+  app.get('/api/export/donations.csv', requireAuth, allowRoles('admin'), (req, res) => {
+    const campaign = String(req.query.campaign || '').trim();
+    const from = String(req.query.from || '').trim(); const to = String(req.query.to || '').trim();
+    if ((from && !validIsoDate(from)) || (to && !validIsoDate(to))) return res.status(400).json({ error: 'Choose real dates for the date range.' });
+    if (from && to && from > to) return res.status(400).json({ error: 'The start date must be on or before the end date.' });
+    const where = ['d.voided = 0']; const values = [];
+    if (campaign) { where.push('d.campaign = ?'); values.push(campaign); }
+    if (from) { where.push('d.date >= ?'); values.push(from); }
+    if (to) { where.push('d.date <= ?'); values.push(to); }
+    const records = db.prepare(`SELECT d.id AS donation_id, d.contact_id, c.name AS donor, d.amount, d.date, d.campaign, d.payment_code, d.method
+      FROM donations d JOIN contacts c ON c.id = d.contact_id WHERE ${where.join(' AND ')} ORDER BY d.date, d.id`).all(...values);
+    const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+    const header = ['donation_id', 'contact_id', 'donor', 'amount', 'date', 'campaign', 'payment_code', 'method'];
+    const lines = [header.map(quote).join(','), ...records.map((record) => header.map((key) => quote(record[key])).join(','))];
+    const filename = `crm-donations${campaign ? `-${campaign.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : ''}.csv`;
+    const total = records.reduce((sum, record) => sum + record.amount, 0);
+    audit(req.user, `download ${campaign || 'all campaigns'} donations CSV · ${records.length} rows · $${total.toFixed(2)}`, 'file export', filename);
+    res.type('text/csv').attachment(filename).send(lines.join('\r\n'));
+  });
+
   app.use((error, _req, res, _next) => {
     console.error(error);
     res.status(500).json({ error: 'Something went wrong. Your saved data was not changed.' });

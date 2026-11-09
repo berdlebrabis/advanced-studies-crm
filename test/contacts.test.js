@@ -80,11 +80,14 @@ test('staff and admin can write while viewer write/import/export/admin requests 
   assert.equal((await viewRequest('/api/contacts/ROLE-TEST/archive', { method: 'POST', body: {} })).status, 403);
   assert.equal((await viewRequest('/api/import/practice-data', { method: 'POST', body: {} })).status, 403);
   assert.equal((await viewRequest('/api/export/contacts.csv')).status, 403);
+  assert.equal((await viewRequest('/api/export/donations.csv?campaign=Campaign%20B')).status, 403);
   assert.equal((await viewRequest('/api/admin/users')).status, 403);
   const staffAdmin = await staff.request('/api/admin/users');
   assert.equal(staffAdmin.response.status, 403);
   const staffExport = await staff.request('/api/export/contacts.csv');
   assert.equal(staffExport.response.status, 403);
+  const staffDonationExport = await staff.request('/api/export/donations.csv?campaign=Campaign%20B');
+  assert.equal(staffDonationExport.response.status, 403);
   const users = await fetch(`${staff.baseUrl}/api/admin/users`, { headers: { cookie: admin.cookie } });
   assert.equal(users.status, 200);
   const created = await fetch(`${staff.baseUrl}/api/admin/users`, { method: 'POST', headers: { cookie: admin.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'new-viewer', role: 'viewer', password: 'VeryFakePass123' }) });
@@ -449,6 +452,131 @@ test('email and contact exports match visible fields, enforce viewer permission,
   assert.ok(history.every((entry) => entry.occurred_at && entry.record_id.endsWith('.csv')));
 }));
 
+test('one connected C900 workflow agrees across dashboard, detail, reports, campaign export, restart, and separate restore', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-connected-workflow-'));
+  const file = path.join(directory, 'practice.sqlite');
+  const previousRestoreDir = process.env.CRM_RESTORE_DIR;
+  process.env.CRM_RESTORE_DIR = path.join(directory, 'restores');
+  let client;
+  try {
+    client = await createClient({ file });
+    const imported = await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+    assert.equal(imported.data.inserted, 30);
+    assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 30);
+    assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM households').get().n, 5);
+    assert.equal((await client.request('/api/memberships/summary?date=2026-10-15')).data.active, 12);
+    assert.equal((await client.request('/api/memberships/summary?date=2026-10-15')).data.peopleCovered, 14);
+    assert.equal((await client.request('/api/reports?date=2026-10-15')).data.donations.total, 355);
+    assert.equal((await client.request('/api/tasks?date=2026-10-15')).data.counts.total, 15);
+
+    const added = await client.request('/api/contacts', { method: 'POST', body: {
+      id: 'C900', name: 'Test Builder', email: 'test900@example.com', phone: '', household_id: '', tags: [], notes: '', email_opt_in: true
+    } });
+    assert.equal(added.response.status, 201);
+    assert.equal((await client.request('/api/overview')).data.activePeople, 31);
+    const membership = await client.request('/api/memberships', { method: 'POST', body: {
+      id: 'M900', contact_id: 'C900', plan: 'individual', amount: 35, payment_code: 'FINAL-M900', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+    } });
+    assert.equal(membership.response.status, 201);
+    assert.equal(membership.data.end_date, '2027-10-15');
+    const renewed = await client.request('/api/memberships/M900/renew', { method: 'POST', body: {
+      amount: 35, payment_code: 'FINAL-R900', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+    } });
+    assert.equal(renewed.response.status, 201);
+    assert.equal(renewed.data.start_date, '2027-10-15');
+    assert.equal(renewed.data.end_date, '2028-10-15');
+    const memberCounts = (await client.request('/api/memberships/summary?date=2026-10-15')).data;
+    assert.equal(memberCounts.active, 13);
+    assert.equal(memberCounts.peopleCovered, 15);
+    let memberRecord = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M900');
+    assert.deepEqual(memberRecord.periods.map(({ start_date, end_date }) => [start_date, end_date]), [
+      ['2026-10-15', '2027-10-15'], ['2027-10-15', '2028-10-15']
+    ]);
+    const duplicateRenewal = await client.request('/api/memberships/M900/renew', { method: 'POST', body: {
+      amount: 35, payment_code: 'FINAL-R900', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+    } });
+    assert.equal(duplicateRenewal.response.status, 409);
+
+    const gift = await client.request('/api/donations', { method: 'POST', body: {
+      id: 'D900', contact_id: 'C900', amount: 12, campaign: 'Campaign B', date: '2026-10-15', method: 'fake card', payment_code: 'FINAL-D900'
+    } });
+    assert.equal(gift.response.status, 201);
+    assert.equal((await client.request('/api/overview')).data.donationTotal, 367);
+    const report = (await client.request('/api/reports?date=2026-10-15')).data;
+    assert.deepEqual(report.campaigns, [{ campaign: 'Campaign A', total: 155 }, { campaign: 'Campaign B', total: 212 }]);
+    const campaignList = (await client.request('/api/donations?campaign=Campaign%20B')).data;
+    assert.equal(campaignList.donations.length, 11);
+    assert.equal(campaignList.summary.total, 212);
+    assert.ok(campaignList.donations.some((item) => item.id === 'D900'));
+    const campaignReplay = await client.request('/api/donations', { method: 'POST', body: {
+      id: 'D901', contact_id: 'C900', amount: 12, campaign: 'Campaign B', date: '2026-10-15', method: 'fake card', payment_code: 'FINAL-D900'
+    } });
+    assert.equal(campaignReplay.response.status, 409);
+    const thankYou = (await client.request('/api/tasks?date=2026-10-15')).data.tasks.find((item) => item.source_key === 'donation:D900:thank-you');
+    assert.equal(thankYou.due_date, '2026-10-22');
+    const completed = await client.request(`/api/tasks/${thankYou.id}/complete`, { method: 'POST', body: {} });
+    assert.equal(completed.data.status, 'complete');
+    const detail = (await client.request('/api/contacts/C900')).data;
+    assert.equal(detail.memberships.length, 1);
+    assert.equal(detail.donations[0].id, 'D900');
+    assert.equal(detail.tasks.find((item) => item.id === thankYou.id).status, 'complete');
+    assert.equal(detail.email_opt_in, true);
+    assert.ok(detail.history.some((item) => item.action === 'add' && item.actor_name === 'staff-demo'));
+    const admin = await client.loginAs('admin-demo', 'AdminDemo2026!');
+    assert.equal(admin.response.status, 200);
+    const campaignCsvResponse = await fetch(`${client.baseUrl}/api/export/donations.csv?campaign=Campaign%20B`, { headers: { cookie: admin.cookie } });
+    assert.equal(campaignCsvResponse.status, 200);
+    const campaignCsv = parseCsv(await campaignCsvResponse.text());
+    assert.equal(campaignCsv.length, 11);
+    assert.equal(campaignCsv.reduce((sum, row) => sum + Number(row.amount), 0), 212);
+    assert.ok(campaignCsv.some((row) => row.donation_id === 'D900'));
+
+    await client.close(); client = null;
+    client = await createClient({ file });
+    const reopenedOverview = (await client.request('/api/overview')).data;
+    assert.equal(reopenedOverview.activePeople, 31);
+    assert.equal(reopenedOverview.activeMemberships, 13);
+    assert.equal(reopenedOverview.donationTotal, 367);
+    memberRecord = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M900');
+    assert.equal(memberRecord.periods.length, 2);
+    assert.equal(memberRecord.payments.length, 2);
+    assert.equal((await client.request('/api/contacts/C900')).data.tasks.find((item) => item.id === thankYou.id).status, 'complete');
+
+    const restoredAdmin = await client.loginAs('admin-demo', 'AdminDemo2026!');
+    const backupResponse = await fetch(`${client.baseUrl}/api/admin/backup`, { headers: { cookie: restoredAdmin.cookie } });
+    const backup = await backupResponse.json();
+    assert.equal(backup.tables.contacts.length, 31);
+    assert.equal(backup.tables.membership_periods.filter((item) => item.membership_id === 'M900').length, 2);
+    assert.equal(backup.tables.donations.length, 21);
+    assert.ok(backup.tables.audit_events.some((item) => item.record_type === 'file export' && item.record_id.includes('campaign-b')));
+    const restoreResponse = await fetch(`${client.baseUrl}/api/admin/restore`, {
+      method: 'POST', headers: { cookie: restoredAdmin.cookie, 'content-type': 'application/json' }, body: JSON.stringify(backup)
+    });
+    assert.equal(restoreResponse.status, 201);
+    const restored = await restoreResponse.json();
+    const restoredDb = new Database(restored.file);
+    try {
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 31);
+      assert.deepEqual(restoredDb.prepare('SELECT start_date, end_date FROM membership_periods WHERE membership_id = ? ORDER BY start_date').all('M900'), [
+        { start_date: '2026-10-15', end_date: '2027-10-15' }, { start_date: '2027-10-15', end_date: '2028-10-15' }
+      ]);
+      assert.deepEqual(restoredDb.prepare('SELECT id, amount, date, campaign, contact_id FROM donations WHERE id = ?').get('D900'), {
+        id: 'D900', amount: 12, date: '2026-10-15', campaign: 'Campaign B', contact_id: 'C900'
+      });
+      assert.equal(restoredDb.prepare('SELECT status FROM tasks WHERE id = ?').get(thankYou.id).status, 'complete');
+      assert.ok(restoredDb.prepare("SELECT 1 FROM audit_events WHERE record_type = 'membership' AND record_id = 'M900' AND actor_name = 'staff-demo'").get());
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS n FROM donations WHERE campaign = ? AND voided = 0').get('Campaign B').n, 11);
+      assert.equal(restoredDb.prepare('SELECT SUM(amount) AS total FROM donations WHERE campaign = ? AND voided = 0').get('Campaign B').total, 212);
+    } finally { restoredDb.close(); }
+    assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 31);
+    assert.equal((await client.request('/api/reports?date=2026-10-15')).data.donations.total, 367);
+  } finally {
+    if (client) await client.close();
+    if (previousRestoreDir === undefined) delete process.env.CRM_RESTORE_DIR; else process.env.CRM_RESTORE_DIR = previousRestoreDir;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('calendar anniversary handles leap day and December 31; 31-day and end-date counts are exact', async () => withClient(async (client) => {
   await client.request('/api/import/practice-data', { method: 'POST', body: {} });
   const leap = await client.request('/api/memberships', { method: 'POST', body: {
@@ -775,6 +903,7 @@ test('viewers cannot change donations, tasks, or backup data; admin restore crea
 test('eight-menu app retains role controls and includes working CSV preview and saved-data reports', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   const links = [...html.matchAll(/<a class="nav-link" href="#([^"]+)" data-screen="([^"]+)">/g)];
   assert.equal(links.length, 8);
   for (const [, hash, screen] of links) assert.equal(hash, screen);
@@ -788,6 +917,11 @@ test('eight-menu app retains role controls and includes working CSV preview and 
   assert.match(html, /id="task-form"/);
   assert.match(html, /id="backup-tools" hidden/);
   assert.match(html, /id="viewer-export-allowed"/);
+  assert.match(html, /id="export-donations"/);
+  assert.match(css, /@media \(max-width: 760px\)/);
+  assert.match(css, /\.table-wrap \{ overflow-x: auto; \}/);
+  assert.match(css, /:focus-visible \{ outline: 3px solid var\(--focus\)/);
+  assert.match(css, /\.sidebar nav \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(app, /function roleCanWrite\(\) \{ return currentUser && \['admin', 'staff'\]\.includes\(currentUser\.role\); \}/);
   assert.match(app, /user\.role !== 'admin'/);
   assert.match(app, /roleCanWrite\(\) \? `<button class="secondary-button renew-membership"/);

@@ -73,6 +73,7 @@ function setSignedIn(user) {
   document.querySelector('#add-membership').hidden = !roleCanWrite();
   document.querySelector('#membership-plan-editor').hidden = user.role !== 'admin';
   document.querySelector('#add-donation').hidden = !roleCanWrite();
+  document.querySelector('#export-donations').hidden = user.role !== 'admin';
   document.querySelector('#add-task').hidden = !roleCanWrite();
   document.querySelector('#backup-tools').hidden = user.role !== 'admin';
   document.querySelector('#settings-summary').textContent = `Signed in as ${user.username} (${user.role}).`;
@@ -195,6 +196,22 @@ async function loadDonations() {
   if (campaign) params.set('campaign', campaign); if (from) params.set('from', from); if (to) params.set('to', to);
   renderDonations(await api(`/api/donations?${params}`));
 }
+
+document.querySelector('#export-donations').addEventListener('click', async () => {
+  const params = new URLSearchParams();
+  const campaign = document.querySelector('#donation-campaign').value;
+  const from = document.querySelector('#donation-from').value; const to = document.querySelector('#donation-to').value;
+  if (campaign) params.set('campaign', campaign); if (from) params.set('from', from); if (to) params.set('to', to);
+  try {
+    const response = await fetch(`/api/export/donations.csv?${params}`, { credentials: 'same-origin' });
+    if (!response.ok) { const error = await response.json(); throw new Error(error.error || 'Export failed.'); }
+    const disposition = response.headers.get('content-disposition') || '';
+    const filename = disposition.match(/filename="?([^";]+)"?/)?.[1] || 'crm-donations.csv';
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+    document.querySelector('#donation-message').textContent = `${filename} downloaded.`;
+  } catch (error) { document.querySelector('#donation-message').textContent = error.message; }
+});
 
 function renderTasks(result) {
   const count = result.counts;
