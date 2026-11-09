@@ -89,6 +89,13 @@ test('staff and admin can write while viewer write/import/export/admin requests 
   assert.equal(users.status, 200);
   const created = await fetch(`${staff.baseUrl}/api/admin/users`, { method: 'POST', headers: { cookie: admin.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'new-viewer', role: 'viewer', password: 'VeryFakePass123' }) });
   assert.equal(created.status, 201);
+  const createdUser = await created.json();
+  assert.equal((await viewRequest(`/api/admin/users/${createdUser.id}`, { method: 'PATCH', body: { role: 'staff' } })).status, 403);
+  const changedRole = await fetch(`${staff.baseUrl}/api/admin/users/${createdUser.id}`, {
+    method: 'PATCH', headers: { cookie: admin.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ role: 'staff' })
+  });
+  assert.equal(changedRole.status, 200);
+  assert.equal((await changedRole.json()).role, 'staff');
   const csv = await fetch(`${staff.baseUrl}/api/export/contacts.csv`, { headers: { cookie: admin.cookie } });
   assert.equal(csv.status, 200);
   assert.match(csv.headers.get('content-type'), /text\/csv/);
@@ -150,6 +157,23 @@ test('contact and a new household save together or both roll back after a forced
   assert.equal(retried.response.status, 201);
   assert.equal(client.db.prepare("SELECT count(*) count FROM households WHERE id='H-FAIL'").get().count, 1);
   assert.equal(client.db.prepare("SELECT count(*) count FROM contacts WHERE id='FAIL1'").get().count, 1);
+}));
+
+test('a failed edit rolls back changed contact fields and a newly selected household', async () => withClient(async (client) => {
+  const original = await addContact(client, { id: 'ROLLBACK1', name: 'Original Name', phone: '555-0001', email: '', household_id: '' });
+  assert.equal(original.response.status, 201);
+  client.db.exec("CREATE TRIGGER fail_edit_audit BEFORE INSERT ON audit_events WHEN NEW.record_id = 'ROLLBACK1' AND NEW.action = 'edit' BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END;");
+  const edit = await client.request('/api/contacts/ROLLBACK1', { method: 'PUT', body: {
+    id: 'ROLLBACK1', name: 'Changed Name', email: '', phone: '555-9999', household_id: 'H-ROLLBACK', household_name: 'Fake rollback household', tags: ['donor'], notes: 'changed', email_opt_in: true
+  } });
+  assert.equal(edit.response.status, 500);
+  const after = (await client.request('/api/contacts/ROLLBACK1')).data;
+  assert.equal(after.name, 'Original Name');
+  assert.equal(after.phone, '555-0001');
+  assert.equal(after.household_id, null);
+  assert.equal(after.notes, 'Fake record');
+  assert.equal(after.email_opt_in, false);
+  assert.equal(client.db.prepare("SELECT count(*) count FROM households WHERE id='H-ROLLBACK'").get().count, 0);
 }));
 
 test('practice import loads 30 people and five households idempotently without overwriting existing contacts', async () => withClient(async (client) => {
