@@ -1,10 +1,10 @@
-# Advanced Studies CRM — CRM 1: Contact Starter
+# Advanced Studies CRM — Contact Management
 
-A small local nonprofit CRM built with Node.js, Express, SQLite, and plain browser HTML, CSS, and JavaScript.
+Existing Node.js + Express + SQLite CRM, using the original browser UI and class practice data.
 
-## Start the app
+## How to run this app
 
-Install the dependencies, then run in PowerShell:
+Install **Node.js 22+** and npm. In the project folder, run:
 
 ```powershell
 npm install
@@ -12,20 +12,26 @@ $env:PORT = 3001
 npm start
 ```
 
-Open <http://localhost:3001>. Port 3000 is occupied by an older local CRM process in this workspace, so this working version uses 3001. The app stores its local database at `data/crm.sqlite`. The supplied class JSON is reference data; only contacts entered in the app are saved.
+Open **http://localhost:3001** in a browser. On macOS/Linux use `PORT=3001 npm start` instead. The default port without the override is 3000.
 
-## Current scope
+Sign in with these **fictional local test accounts only**:
 
-Task 1 screen sketches are in `docs/screens/`. The first working slice focuses on contact entry, search, and a small dashboard. Unfinished screens say “Not built yet.” The classroom records are fictional. Login and settings are not built, so this demo has no login screen or demo credentials.
+| Username | Password | Access |
+| --- | --- | --- |
+| admin-demo | demo-admin | Read and edit contacts |
+| staff-demo | demo-staff | Read and edit contacts |
+| viewer-demo | demo-viewer | Read only |
 
-## Three next changes
+Open **Login / Settings** and click **Load missing practice contacts**. This adds the 30 fictional contacts and five households from `data/crm-classroom-test-data.json` without overwriting already-saved contacts. Loading twice is safe. To archive C130, open that contact and choose Archive. The active list then shows 29 if the initial 30 are the only contacts. Archived records stay in SQLite and remain retrievable by ID.
 
-1. Build membership entry and renewals using the real contact records.
-2. Build donation entry and saved-gift history.
-3. Add tasks, reports, and export workflows, then finish login and settings.
+Search by name or ID, select a tag, open a contact to see household members, and use Edit / Save / Cancel. The change history is in Login / Settings. Viewer sign-in is read-only, including server-side checks.
 
-## Run automated tests
+**Saved data:** `data/crm.sqlite` (or `CRM_DB_PATH` when set). Normal startup does not reseed or delete data. Keep your local SQLite database out of Git. Never use real contact information with the fixed demo passwords.
+
+## Tests
 
 ```powershell
 npm test
 ```
+
+Tests use an in-memory database, not the saved app database. The CRM's original membership, donation, task, and report screens are **not built yet**. User management, settings editing, import of CSV files, export, backup, and restore are **not built yet**. The practice-data loader imports the JSON contacts and households only. The fixed demo sign-in is for classroom practice, not production authentication.
