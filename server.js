@@ -2,6 +2,7 @@ const express = require('express');
 const Database = require('better-sqlite3');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const root = __dirname;
 const referencePath = path.join(root, 'data', 'crm-classroom-test-data.json');
@@ -65,6 +66,15 @@ function initializeSchema(db) {
       status TEXT NOT NULL,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS unique_contact_email ON contacts(email COLLATE NOCASE) WHERE email <> '';
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, record_id TEXT NOT NULL,
+      action TEXT NOT NULL, at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE TABLE IF NOT EXISTS demo_users (
+      id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK(role IN ('admin','staff','viewer')),
+      password_hash TEXT NOT NULL
+    );
   `);
 }
 
@@ -72,6 +82,63 @@ function createApp(db) {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(root, 'public')));
+  const sessions = new Map();
+  const passwordHash = (password, salt) => crypto.scryptSync(password, salt, 64).toString('hex');
+  const demo = { 'admin-demo': 'admin', 'staff-demo': 'staff', 'viewer-demo': 'viewer' };
+  // Fictional local demonstration accounts; never use these credentials for real data.
+  for (const [id, role] of Object.entries(demo)) {
+    const salt = id + '-classroom-only';
+    db.prepare('INSERT OR IGNORE INTO demo_users (id,role,password_hash) VALUES (?,?,?)')
+      .run(id, role, passwordHash('demo-' + role, salt));
+  }
+  app.post('/api/sign-in', (req, res) => {
+    const id = String(req.body?.id || '');
+    const user = db.prepare('SELECT * FROM demo_users WHERE id = ?').get(id);
+    const supplied = passwordHash(String(req.body?.password || ''), id + '-classroom-only');
+    if (!user || !crypto.timingSafeEqual(Buffer.from(user.password_hash,'hex'), Buffer.from(supplied,'hex')))
+      return res.status(401).json({error:'Invalid test username or password.'});
+    const token = crypto.randomBytes(32).toString('hex');
+    sessions.set(token, id);
+    res.cookie?.('unused', '');
+    res.setHeader('Set-Cookie', 'crm_session=' + token + '; HttpOnly; SameSite=Strict; Path=/');
+    res.json({id, role:user.role});
+  });
+  app.post('/api/sign-out', (req,res) => {
+    const token = /(?:^|; )crm_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+    sessions.delete(token);
+    res.setHeader('Set-Cookie','crm_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/');
+    res.json({ok:true});
+  });
+  app.use('/api', (req,res,next) => {
+    if (req.path === '/health') return next();
+    const token = /(?:^|; )crm_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+    const id = sessions.get(token);
+    req.user = id && db.prepare('SELECT id,role FROM demo_users WHERE id=?').get(id);
+    if (!req.user) return res.status(401).json({error:'Sign in to use the CRM.'});
+    if (['POST','PUT','PATCH','DELETE'].includes(req.method) && !['admin','staff'].includes(req.user.role))
+      return res.status(403).json({error:'Your viewer account cannot make changes.'});
+    if (/^\/(users|settings|export|backup|restore|prices)(\/|$)/.test(req.path) && req.user.role !== 'admin')
+      return res.status(403).json({error:'Admin permission required.'});
+    next();
+  });
+  app.get('/api/me', (req,res) => res.json(req.user));
+  app.get('/api/audit', (req,res) => res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 100').all()));
+  app.get('/api/households', (req,res) => res.json(db.prepare('SELECT h.*, COUNT(c.id) AS people FROM households h LEFT JOIN contacts c ON c.household_id=h.id GROUP BY h.id ORDER BY h.id').all()));
+  app.get('/api/households/:id', (req,res) => {
+    const household=db.prepare('SELECT * FROM households WHERE id=?').get(req.params.id);
+    if(!household) return res.status(404).json({error:'Household not found.'});
+    res.json({...household,contacts:db.prepare('SELECT id,name,archived FROM contacts WHERE household_id=? ORDER BY name').all(household.id)});
+  });
+  app.post('/api/load-practice', (req,res) => {
+    const data=readReferenceData();
+    const seed=db.transaction(() => {
+      for(const h of data.households) db.prepare('INSERT OR IGNORE INTO households(id,name) VALUES (?,?)').run(h.id,h.name);
+      for(const c of data.contacts) db.prepare('INSERT OR IGNORE INTO contacts(id,name,email,phone,household_id,tags,notes,email_opt_in,archived) VALUES (?,?,?,?,?,?,?,?,?)')
+        .run(c.id,c.name,c.email||'',c.phone||'',c.household_id||null,JSON.stringify(c.tags||[]),c.notes||'',c.email_opt_in?1:0,c.archived?1:0);
+    });
+    seed();
+    res.json({stored:db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, active:db.prepare('SELECT COUNT(*) AS n FROM contacts WHERE archived=0').get().n});
+  });
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -89,7 +156,7 @@ function createApp(db) {
   });
 
   app.get('/api/households/options', (_req, res) => {
-    const households = readReferenceData().households.map(({ id, name }) => ({ id, name }));
+    const households = db.prepare('SELECT id,name FROM households ORDER BY id').all();
     res.json(households);
   });
 
@@ -97,7 +164,7 @@ function createApp(db) {
     const query = String(req.query.search || '').trim();
     const pattern = `%${query}%`;
     const contacts = db.prepare(`SELECT c.id, c.name, c.email, c.phone, c.household_id, c.tags, c.notes,
-        c.email_opt_in, h.name AS household_name
+        c.email_opt_in, c.archived, h.name AS household_name
       FROM contacts c LEFT JOIN households h ON h.id = c.household_id
       WHERE c.archived = 0 AND (? = '' OR c.id LIKE ? COLLATE NOCASE OR c.name LIKE ? COLLATE NOCASE OR c.email LIKE ? COLLATE NOCASE)
       ORDER BY c.name COLLATE NOCASE`).all(query, pattern, pattern, pattern)
@@ -109,7 +176,7 @@ function createApp(db) {
     const contact = db.prepare(`SELECT c.id, c.name, c.email, c.phone, c.household_id, c.tags, c.notes,
         c.email_opt_in, h.name AS household_name
       FROM contacts c LEFT JOIN households h ON h.id = c.household_id
-      WHERE c.id = ? AND c.archived = 0`).get(req.params.id);
+      WHERE c.id = ?`).get(req.params.id);
     if (!contact) return res.status(404).json({ error: 'Contact not found.' });
     const memberships = db.prepare('SELECT * FROM memberships WHERE contact_id = ? ORDER BY start_date DESC').all(contact.id);
     const donations = db.prepare('SELECT * FROM donations WHERE contact_id = ? ORDER BY date DESC').all(contact.id);
@@ -117,6 +184,42 @@ function createApp(db) {
     res.json({ ...contact, tags: JSON.parse(contact.tags), email_opt_in: Boolean(contact.email_opt_in), memberships, donations, tasks });
   });
 
+  app.put('/api/contacts/:id', (req,res) => {
+    const original=db.prepare('SELECT * FROM contacts WHERE id=?').get(req.params.id);
+    if(!original) return res.status(404).json({error:'Contact not found.'});
+    if(req.body.id !== undefined && String(req.body.id).trim() !== req.params.id)
+      return res.status(400).json({error:'Contact ID cannot be changed.'});
+    const name=String(req.body.name ?? original.name).trim();
+    const email=String(req.body.email ?? original.email).trim();
+    if(!name) return res.status(400).json({error:'Enter a name.'});
+    if(email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return res.status(400).json({error:'Enter a valid email address.'});
+    if(email && db.prepare('SELECT id FROM contacts WHERE email=? COLLATE NOCASE AND id<>?').get(email,req.params.id))
+      return res.status(409).json({error:'Email is already used by another contact.'});
+    const household_id=String(req.body.household_id ?? original.household_id ?? '').trim() || null;
+    if(household_id && !db.prepare('SELECT 1 FROM households WHERE id=?').get(household_id))
+      return res.status(400).json({error:'Choose a valid household.'});
+    const tags=Array.isArray(req.body.tags)?req.body.tags:String(req.body.tags ?? JSON.parse(original.tags).join(',')).split(',');
+    const normalizedTags=tags.map(t=>String(t).trim()).filter(Boolean);
+    try {
+      db.transaction(()=>{
+        db.prepare('UPDATE contacts SET name=?,email=?,phone=?,household_id=?,tags=?,notes=?,email_opt_in=? WHERE id=?')
+          .run(name,email,String(req.body.phone ?? original.phone).trim(),household_id,JSON.stringify(normalizedTags),
+            String(req.body.notes ?? original.notes).trim(),req.body.email_opt_in === undefined ? original.email_opt_in : (req.body.email_opt_in === true ? 1 : 0),req.params.id);
+        db.prepare('INSERT INTO audit_log(actor,record_id,action) VALUES (?,?,?)').run(req.user.id,req.params.id,'edit');
+      })();
+      res.json({ok:true,id:req.params.id});
+    } catch(e) { res.status(500).json({error:'Save failed; your previous contact details are unchanged.'}); }
+  });
+  app.post('/api/contacts/:id/archive', (req,res)=>{
+    if(!db.prepare('SELECT 1 FROM contacts WHERE id=?').get(req.params.id)) return res.status(404).json({error:'Contact not found.'});
+    try {
+      db.transaction(()=>{
+        db.prepare('UPDATE contacts SET archived=1 WHERE id=?').run(req.params.id);
+        db.prepare('INSERT INTO audit_log(actor,record_id,action) VALUES (?,?,?)').run(req.user.id,req.params.id,'archive');
+      })();
+      res.json({ok:true});
+    } catch(e){res.status(500).json({error:'Archive failed; no changes saved.'});}
+  });
   app.post('/api/contacts', (req, res) => {
     const id = String(req.body.id || '').trim();
     const name = String(req.body.name || '').trim();
@@ -131,6 +234,8 @@ function createApp(db) {
 
     if (!id) return res.status(400).json({ error: 'Enter a contact ID.' });
     if (!name) return res.status(400).json({ error: 'Enter a name.' });
+    if (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) return res.status(400).json({error:'Enter a valid email address.'});
+    if (email && db.prepare('SELECT 1 FROM contacts WHERE email=? COLLATE NOCASE').get(email)) return res.status(409).json({error:'Email is already used by another contact.'});
     if (db.prepare('SELECT 1 FROM contacts WHERE id = ?').get(id)) {
       return res.status(409).json({ error: 'A contact with that ID already exists.' });
     }
@@ -148,6 +253,7 @@ function createApp(db) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
           id, name, email, phone, householdId, JSON.stringify(tags), notes, emailOptIn ? 1 : 0
         );
+      db.prepare('INSERT INTO audit_log(actor,record_id,action) VALUES (?,?,?)').run(req.user.id,id,'add');
     });
     try {
       save();
@@ -155,7 +261,7 @@ function createApp(db) {
       if (error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
         return res.status(409).json({ error: 'A contact with that ID already exists.' });
       }
-      throw error;
+      return res.status(500).json({error:'Save failed; neither contact nor household was added.'});
     }
     const householdName = householdReference?.name || null;
     res.status(201).json({ id, name, email, phone, household_id: householdId,
@@ -170,6 +276,7 @@ function createApp(db) {
 }
 
 if (require.main === module) {
+  fs.mkdirSync(path.dirname(databasePath), {recursive:true});
   const db = new Database(databasePath);
   initializeSchema(db);
   const app = createApp(db);
