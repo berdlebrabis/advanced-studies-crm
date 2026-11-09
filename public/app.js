@@ -12,6 +12,9 @@ let editingId = null;
 let membershipPlans = [];
 let memberships = [];
 let practiceDate = '2026-10-15';
+let selectedCsvFile = null;
+let csvPreview = null;
+let viewerExportAllowed = false;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -47,6 +50,7 @@ function setScreen(screenName) {
   if (nextScreen === 'memberships' && currentUser) loadMembershipData().catch(showMembershipError);
   if (nextScreen === 'donations' && currentUser) loadDonations().catch((error) => showScreenError('#donation-message', error));
   if (nextScreen === 'tasks' && currentUser) loadTasks().catch((error) => showScreenError('#task-message', error));
+  if (nextScreen === 'reports' && currentUser) loadReports().catch((error) => showScreenError('#report-message', error));
 }
 
 function roleCanWrite() { return currentUser && ['admin', 'staff'].includes(currentUser.role); }
@@ -64,7 +68,7 @@ function setSignedIn(user) {
   document.querySelector('#sign-out').hidden = false;
   document.querySelectorAll('[data-add-contact]').forEach((button) => { button.hidden = !roleCanWrite(); });
   document.querySelector('#contact-import-tools').hidden = !roleCanWrite();
-  document.querySelector('#export-contacts').hidden = user.role !== 'admin';
+  document.querySelector('#contact-export-tools').hidden = !(user.role === 'admin' || (user.role === 'viewer' && viewerExportAllowed));
   document.querySelector('#user-management').hidden = user.role !== 'admin';
   document.querySelector('#add-membership').hidden = !roleCanWrite();
   document.querySelector('#membership-plan-editor').hidden = user.role !== 'admin';
@@ -72,6 +76,12 @@ function setSignedIn(user) {
   document.querySelector('#add-task').hidden = !roleCanWrite();
   document.querySelector('#backup-tools').hidden = user.role !== 'admin';
   document.querySelector('#settings-summary').textContent = `Signed in as ${user.username} (${user.role}).`;
+}
+
+async function updateExportAccess() {
+  const data = await api('/api/settings/export-permission');
+  viewerExportAllowed = data.viewerExportAllowed;
+  document.querySelector('#contact-export-tools').hidden = !(currentUser?.role === 'admin' || (currentUser?.role === 'viewer' && viewerExportAllowed));
 }
 
 function showSignedOut() {
@@ -138,12 +148,25 @@ async function loadOverview() {
   document.querySelector('#test-date').textContent = `Practice data · ${dateFormat.format(new Date(`${data.testDate}T00:00:00`))}`;
   const dateInput = document.querySelector('#membership-as-of');
   if (!dateInput.dataset.initialized) { dateInput.value = data.testDate; dateInput.dataset.initialized = 'true'; }
+  const reportDate = document.querySelector('#report-as-of');
+  if (!reportDate.dataset.initialized) { reportDate.value = data.testDate; reportDate.dataset.initialized = 'true'; }
   document.querySelector('#metric-contacts').textContent = data.activePeople;
   document.querySelector('#metric-members').textContent = data.activeMemberships;
   document.querySelector('#metric-giving').textContent = money.format(data.donationTotal);
   document.querySelector('#gift-count').textContent = `${data.donationCount} recorded gifts`;
   document.querySelector('#metric-renewals').textContent = data.renewalsDue;
   document.querySelector('#metric-tasks').textContent = data.overdueTasks;
+}
+
+async function loadReports() {
+  const date = document.querySelector('#report-as-of').value || practiceDate;
+  const report = await api(`/api/reports?date=${encodeURIComponent(date)}`);
+  document.querySelector('#report-donation-total').textContent = money.format(report.donations.total);
+  document.querySelector('#report-donation-count').textContent = `${report.donations.count} saved, non-void gifts through ${report.asOf}`;
+  document.querySelector('#report-active-memberships').textContent = report.activeMemberships;
+  document.querySelector('#report-covered-people').textContent = report.peopleCovered;
+  document.querySelector('#report-overdue-tasks').textContent = report.overdueTasks;
+  document.querySelector('#report-campaign-rows').innerHTML = report.campaigns.map((item) => `<tr><td>${escapeHtml(item.campaign)}</td><td>${money.format(item.total)}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">No donations saved by this date.</td></tr>';
 }
 
 function showMembershipError(error) {
@@ -367,6 +390,9 @@ async function loadSettings() {
     document.querySelector('#audit-list').innerHTML = showHistory(audit);
     if (currentUser.role === 'admin') {
       const users = await api('/api/admin/users');
+      const access = await api('/api/settings/export-permission');
+      viewerExportAllowed = access.viewerExportAllowed;
+      document.querySelector('#viewer-export-allowed').checked = viewerExportAllowed;
       document.querySelector('#user-list').innerHTML = `<table><thead><tr><th>USERNAME</th><th>ROLE</th><th>CHANGE ROLE</th></tr></thead><tbody>${users.map((user) => `<tr><td>${escapeHtml(user.username)}</td><td>${escapeHtml(user.role)}</td><td><select data-user-role="${user.id}" aria-label="Role for ${escapeHtml(user.username)}"><option ${user.role === 'viewer' ? 'selected' : ''} value="viewer">Viewer</option><option ${user.role === 'staff' ? 'selected' : ''} value="staff">Staff</option><option ${user.role === 'admin' ? 'selected' : ''} value="admin">Admin</option></select></td></tr>`).join('')}</tbody></table>`;
       document.querySelectorAll('[data-user-role]').forEach((select) => select.addEventListener('change', async () => {
         try { await api(`/api/admin/users/${select.dataset.userRole}`, { method: 'PATCH', body: JSON.stringify({ role: select.value }) }); }
@@ -566,27 +592,63 @@ document.querySelector('#load-practice-data').addEventListener('click', async ()
   } catch (error) { showError(error); } finally { button.disabled = false; }
 });
 
-document.querySelector('#csv-import-file').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  try {
-    const result = await api('/api/import/contacts-csv', { method: 'POST', body: JSON.stringify({ csv: await file.text() }) });
-    const problems = result.rows.filter((item) => item.status === 'error').map((item) => `Row ${item.row} (${item.id || 'no ID'}): ${item.message}`).join(' ');
-    document.querySelector('#contact-message').textContent = `CSV import: ${result.added} added, ${result.skipped} kept unchanged, ${result.errors} with errors.${problems ? ` ${problems}` : ''}`;
-    document.querySelector('#contact-message').hidden = false;
-    await loadHouseholdOptions();
-    await refreshData();
-  } catch (error) { showError(error); }
-  event.target.value = '';
+document.querySelector('#csv-import-file').addEventListener('change', (event) => {
+  selectedCsvFile = event.target.files[0] || null; csvPreview = null;
+  document.querySelector('#csv-file-name').textContent = selectedCsvFile?.name || 'No file chosen';
+  document.querySelector('#preview-csv').disabled = !selectedCsvFile;
+  document.querySelector('#csv-preview-panel').hidden = true;
 });
 
-document.querySelector('#export-contacts').addEventListener('click', async () => {
+function renderCsvPreview(result) {
+  csvPreview = result;
+  document.querySelector('#csv-preview-summary').textContent = `${result.added} new · ${result.duplicates} duplicate · ${result.errors} error`;
+  document.querySelector('#csv-preview-rows').innerHTML = result.rows.map((item) => `<tr><td>${item.row}</td><td>${escapeHtml(item.id || '—')}</td><td>${escapeHtml(item.contact?.name || '')}</td><td><span class="csv-status csv-${item.status.toLowerCase()}">${escapeHtml(item.status)}</span></td><td>${escapeHtml(item.message)}</td></tr>`).join('');
+  document.querySelector('#csv-preview-message').textContent = result.errors ? 'Fix every Error before importing. No rows will be saved while errors remain.' : 'Preview is ready. Import saves all New rows together; Duplicate rows stay unchanged.';
+  document.querySelector('#import-csv').disabled = result.errors > 0;
+  document.querySelector('#csv-preview-panel').hidden = false;
+}
+
+document.querySelector('#preview-csv').addEventListener('click', async () => {
+  if (!selectedCsvFile) return;
+  try { renderCsvPreview(await api('/api/import/contacts-csv/preview', { method: 'POST', body: JSON.stringify({ csv: await selectedCsvFile.text(), filename: selectedCsvFile.name }) })); }
+  catch (error) { showError(error); }
+});
+
+document.querySelector('#import-csv').addEventListener('click', async () => {
+  if (!selectedCsvFile || !csvPreview || csvPreview.errors) return;
+  const button = document.querySelector('#import-csv'); button.disabled = true;
   try {
-    const response = await fetch('/api/export/contacts.csv', { credentials: 'same-origin' });
+    const result = await api('/api/import/contacts-csv', { method: 'POST', body: JSON.stringify({ csv: await selectedCsvFile.text(), filename: selectedCsvFile.name }) });
+    renderCsvPreview(result);
+    document.querySelector('#csv-preview-message').textContent = result.message;
+    document.querySelector('#csv-file-name').textContent = `${selectedCsvFile.name} · imported`;
+    await Promise.all([loadHouseholdOptions(), refreshData()]);
+  } catch (error) { document.querySelector('#csv-preview-message').textContent = error.message; button.disabled = !csvPreview || csvPreview.errors > 0; }
+});
+
+document.querySelector('#cancel-csv-import').addEventListener('click', () => {
+  selectedCsvFile = null; csvPreview = null; document.querySelector('#csv-import-file').value = '';
+  document.querySelector('#csv-file-name').textContent = 'No file chosen'; document.querySelector('#preview-csv').disabled = true;
+  document.querySelector('#csv-preview-panel').hidden = true; document.querySelector('#csv-preview-message').textContent = '';
+});
+
+async function downloadContactFile(endpoint, filename) {
+  try {
+    const filters = currentContactFilters(); const url = `${endpoint}${filters ? `?${filters}` : ''}`;
+    const response = await fetch(url, { credentials: 'same-origin' });
     if (!response.ok) { const error = await response.json(); throw new Error(error.error || 'Export failed.'); }
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a'); link.href = url; link.download = 'crm-contacts.csv'; link.click(); URL.revokeObjectURL(url);
+    const urlObject = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = urlObject; link.download = filename; link.click(); URL.revokeObjectURL(urlObject);
+    document.querySelector('#contact-message').textContent = `${filename} downloaded.`;
   } catch (error) { showError(error); }
+}
+document.querySelector('#export-contacts').addEventListener('click', () => downloadContactFile('/api/export/contacts.csv', 'crm-contacts.csv'));
+document.querySelector('#export-email-list').addEventListener('click', () => downloadContactFile('/api/export/email-list.csv', 'crm-email-list.csv'));
+document.querySelector('#report-as-of').addEventListener('change', () => loadReports().catch((error) => showScreenError('#report-message', error)));
+document.querySelector('#viewer-export-allowed').addEventListener('change', async (event) => {
+  const checkbox = event.currentTarget;
+  try { const result = await api('/api/admin/settings/viewer-export', { method: 'PATCH', body: JSON.stringify({ allowed: checkbox.checked }) }); viewerExportAllowed = result.viewerExportAllowed; document.querySelector('#export-setting-message').textContent = viewerExportAllowed ? 'Viewer exports are enabled.' : 'Viewer exports are disabled.'; }
+  catch (error) { checkbox.checked = !checkbox.checked; document.querySelector('#export-setting-message').textContent = error.message; }
 });
 
 document.querySelector('#login-form').addEventListener('submit', async (event) => {
@@ -596,11 +658,12 @@ document.querySelector('#login-form').addEventListener('submit', async (event) =
     const { user } = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(formData) });
     setSignedIn(user);
     document.querySelector('#login-message').textContent = '';
-    await Promise.all([loadHouseholdOptions(), loadTags()]);
+    await Promise.all([loadHouseholdOptions(), loadTags(), updateExportAccess()]);
     await refreshData();
     if (location.hash === '#memberships') await loadMembershipData();
     if (location.hash === '#donations') await loadDonations();
     if (location.hash === '#tasks') await loadTasks();
+    if (location.hash === '#reports') await loadReports();
     if (user.role === 'admin' && location.hash === '#settings') loadSettings();
     document.querySelector('#contact-search').focus();
   } catch (error) { showError(error, '#login-message'); }
@@ -626,10 +689,11 @@ async function boot() {
   try {
     const { user } = await api('/api/auth/me');
     setSignedIn(user);
-    await Promise.all([loadHouseholdOptions(), loadTags()]);
+    await Promise.all([loadHouseholdOptions(), loadTags(), updateExportAccess()]);
     await refreshData();
     if (location.hash === '#memberships') await loadMembershipData();
     if (location.hash === '#settings') loadSettings();
+    if (location.hash === '#reports') await loadReports();
   } catch (_error) { showSignedOut(); }
 }
 boot();

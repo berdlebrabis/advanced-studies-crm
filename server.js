@@ -3,6 +3,7 @@ const Database = require('better-sqlite3');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { parse: parseCsvText } = require('csv-parse/sync');
 
 const root = __dirname;
 const referencePath = path.join(root, 'data', 'crm-classroom-test-data.json');
@@ -113,11 +114,16 @@ function initializeSchema(db) {
       record_id TEXT NOT NULL,
       occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
   ensureColumn(db, 'contacts', 'archived', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'donations', 'voided_by', 'TEXT');
   ensureColumn(db, 'donations', 'voided_at', 'TEXT');
   ensureColumn(db, 'tasks', 'source_key', 'TEXT');
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('viewer_export_allowed', '0')").run();
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique_ci ON contacts(lower(trim(email))) WHERE trim(email) <> ''");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS donations_payment_code_unique ON donations(payment_code) WHERE payment_code IS NOT NULL AND trim(payment_code) <> ''");
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS tasks_source_key_unique ON tasks(source_key) WHERE source_key IS NOT NULL');
@@ -154,30 +160,18 @@ function initializeSchema(db) {
   seedUsers();
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let quoted = false;
-  const input = String(text || '').replace(/^\uFEFF/, '');
-  for (let i = 0; i < input.length; i += 1) {
-    const char = input[i];
-    if (quoted && char === '"' && input[i + 1] === '"') { field += '"'; i += 1; }
-    else if (char === '"') quoted = !quoted;
-    else if (char === ',' && !quoted) { row.push(field); field = ''; }
-    else if ((char === '\n' || char === '\r') && !quoted) {
-      if (char === '\r' && input[i + 1] === '\n') i += 1;
-      row.push(field); field = '';
-      if (row.some((item) => item.trim() !== '')) rows.push(row);
-      row = [];
-    } else field += char;
-  }
-  row.push(field);
-  if (row.some((item) => item.trim() !== '')) rows.push(row);
-  if (!rows.length) return [];
-  const headers = rows.shift().map((item) => item.trim());
-  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
+const CSV_HEADERS = ['contact_id', 'name', 'email', 'phone', 'household', 'tags', 'notes', 'email_opt_in'];
+
+function parseCsvDocument(text) {
+  const records = parseCsvText(String(text || ''), { bom: true, skip_empty_lines: true, relax_quotes: false, trim: false });
+  if (!records.length) return { headers: [], rows: [] };
+  const headers = records[0].map((item) => String(item).trim());
+  const duplicates = headers.filter((item, index) => headers.indexOf(item) !== index);
+  if (duplicates.length) throw new Error(`Repeated CSV header: ${duplicates[0]}.`);
+  return { headers, rows: records.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']))) };
 }
+
+function parseCsv(text) { return parseCsvDocument(text).rows; }
 
 function cleanContact(input) {
   const clean = (value) => String(value ?? '').trim();
@@ -354,6 +348,29 @@ function createApp(db) {
     const overdueTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date < ?").get(today).count;
     res.json({ testDate: today, activePeople, activeMemberships: memberSummary.active, donationCount: donation.count,
       donationTotal: donation.total, renewalsDue: renewalDue, overdueTasks });
+  });
+
+  app.get('/api/reports', requireAuth, (req, res) => {
+    const asOf = String(req.query.date || readReferenceData().test_date);
+    if (!validIsoDate(asOf)) return res.status(400).json({ error: 'Choose a real report date in YYYY-MM-DD format.' });
+    const gifts = db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total FROM donations WHERE voided = 0 AND date <= ?').get(asOf);
+    const campaigns = db.prepare('SELECT campaign, SUM(amount) AS total FROM donations WHERE voided = 0 AND date <= ? GROUP BY campaign ORDER BY campaign COLLATE NOCASE').all(asOf);
+    const memberships = summarizeMemberships(db, asOf);
+    const overdueTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date < ?").get(asOf).count;
+    res.json({ asOf, donations: gifts, campaigns, activeMemberships: memberships.active, peopleCovered: memberships.peopleCovered, overdueTasks });
+  });
+
+  app.get('/api/settings/export-permission', requireAuth, (_req, res) => {
+    const setting = db.prepare("SELECT value FROM app_settings WHERE key = 'viewer_export_allowed'").get();
+    res.json({ viewerExportAllowed: setting?.value === '1' });
+  });
+
+  app.patch('/api/admin/settings/viewer-export', requireAuth, allowRoles('admin'), (req, res) => {
+    if (typeof req.body.allowed !== 'boolean') return res.status(400).json({ error: 'Choose whether viewers may export.' });
+    const value = req.body.allowed ? '1' : '0';
+    db.prepare("UPDATE app_settings SET value = ? WHERE key = 'viewer_export_allowed'").run(value);
+    audit(req.user, req.body.allowed ? 'allow viewer exports' : 'disable viewer exports', 'setting', 'viewer_export_allowed');
+    res.json({ viewerExportAllowed: req.body.allowed });
   });
 
   function donationSummary({ campaign, from, to }) {
@@ -867,28 +884,78 @@ function createApp(db) {
       message: `Added ${inserted.length} practice contacts, loaded ${importedMembershipCount} memberships, ${importedDonationCount} donations, and ${importedTaskCount} tasks; kept existing contact records unchanged.` });
   });
 
-  app.post('/api/import/contacts-csv', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
-    let rows;
-    try { rows = parseCsv(req.body.csv); } catch (_error) { return res.status(400).json({ error: 'Could not read the CSV file.' }); }
-    if (!rows.length) return res.status(400).json({ error: 'The CSV file has no contact rows.' });
-    const outcome = [];
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[index];
-      const id = String(row.contact_id ?? row.id ?? '').trim();
-      if (id && db.prepare('SELECT 1 FROM contacts WHERE id = ?').get(id)) { outcome.push({ row: index + 2, id, status: 'skipped', message: 'That ID is already saved; existing data was kept.' }); continue; }
-      const parsed = cleanContact(row);
-      if (parsed.error) { outcome.push({ row: index + 2, id, status: 'error', message: parsed.error }); continue; }
-      const contact = parsed.contact;
-      try {
-        saveContact(contact, req.user, 'add');
-        outcome.push({ row: index + 2, id: contact.id, status: 'added', message: 'Contact added.' });
-      } catch (error) {
-        const message = error.code === 'SQLITE_CONSTRAINT_UNIQUE' ? 'That email is already used by another contact.' : error.status ? error.message : 'Could not save this contact.';
-        outcome.push({ row: index + 2, id: contact.id, status: 'error', message });
-      }
+  function previewContactCsv(csv) {
+    const document = parseCsvDocument(csv);
+    if (!document.headers.length) return { error: 'The CSV file has no header row.' };
+    const missing = CSV_HEADERS.filter((header) => !document.headers.includes(header));
+    const extra = document.headers.filter((header) => !CSV_HEADERS.includes(header));
+    if (missing.length || extra.length) return { error: `CSV headers must be exactly: ${CSV_HEADERS.join(', ')}. ${missing.length ? `Missing: ${missing.join(', ')}. ` : ''}${extra.length ? `Unexpected: ${extra.join(', ')}.` : ''}` };
+    if (!document.rows.length) return { error: 'The CSV file has no contact rows.' };
+    const rows = document.rows.map((row, index) => ({ row: index + 2, id: String(row.contact_id || '').trim(), raw: row, status: '', message: '', contact: null }));
+    const idCounts = new Map();
+    for (const item of rows) {
+      if (item.id && !db.prepare('SELECT 1 FROM contacts WHERE id = ?').get(item.id)) idCounts.set(item.id, (idCounts.get(item.id) || 0) + 1);
     }
-    res.json({ rows: outcome, added: outcome.filter((item) => item.status === 'added').length,
-      errors: outcome.filter((item) => item.status === 'error').length, skipped: outcome.filter((item) => item.status === 'skipped').length });
+    const emailRows = new Map();
+    for (const item of rows) {
+      if (item.id && db.prepare('SELECT 1 FROM contacts WHERE id = ?').get(item.id)) {
+        item.status = 'Duplicate'; item.message = 'This contact ID is already saved; existing details and history will be kept.'; continue;
+      }
+      if (item.id && idCounts.get(item.id) > 1) {
+        item.status = 'Error'; item.message = 'This new contact ID appears more than once in the file.'; continue;
+      }
+      const consent = String(item.raw.email_opt_in ?? '').trim().toLowerCase();
+      if (!['', 'true', 'false'].includes(consent)) { item.status = 'Error'; item.message = 'Email permission must be true, false, or blank.'; continue; }
+      const parsed = cleanContact({
+        contact_id: item.raw.contact_id, name: item.raw.name, email: item.raw.email, phone: item.raw.phone,
+        household: item.raw.household, tags: String(item.raw.tags || '').split(';'), notes: item.raw.notes,
+        email_opt_in: consent || 'false'
+      });
+      if (parsed.error) { item.status = 'Error'; item.message = parsed.error; continue; }
+      item.contact = parsed.contact;
+      if (item.contact.email) {
+        const used = db.prepare('SELECT id FROM contacts WHERE lower(trim(email)) = lower(trim(?)) AND id <> ? LIMIT 1').get(item.contact.email, item.contact.id);
+        if (used) { item.status = 'Error'; item.message = `This email is already used by contact ${used.id}.`; continue; }
+        const key = item.contact.email.toLowerCase();
+        if (!emailRows.has(key)) emailRows.set(key, []);
+        emailRows.get(key).push(item);
+      }
+      item.status = 'New'; item.message = 'Ready to add.';
+    }
+    for (const group of emailRows.values()) if (group.length > 1) for (const item of group) {
+      item.status = 'Error'; item.message = 'This email is repeated for more than one new contact in the file.';
+    }
+    return { rows: rows.map(({ row, id, status, message, contact }) => ({ row, id, status, message, ...(contact ? { contact } : {}) })) };
+  }
+
+  app.post('/api/import/contacts-csv/preview', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    try {
+      const result = previewContactCsv(req.body.csv);
+      if (result.error) return res.status(400).json({ error: result.error });
+      res.json({ rows: result.rows, added: result.rows.filter((item) => item.status === 'New').length,
+        duplicates: result.rows.filter((item) => item.status === 'Duplicate').length, errors: result.rows.filter((item) => item.status === 'Error').length });
+    } catch (_error) { res.status(400).json({ error: 'Could not read the CSV file. Check its quotes and column counts.' }); }
+  });
+
+  app.post('/api/import/contacts-csv', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    let result;
+    try { result = previewContactCsv(req.body.csv); } catch (_error) { return res.status(400).json({ error: 'Could not read the CSV file. Check its quotes and column counts.' }); }
+    if (result.error) return res.status(400).json({ error: result.error });
+    const errors = result.rows.filter((item) => item.status === 'Error');
+    if (errors.length) return res.status(400).json({ error: `Import stopped: ${errors.length} row(s) have errors. Fix them and preview again; no rows were saved.`, rows: result.rows, added: 0, duplicates: result.rows.filter((item) => item.status === 'Duplicate').length, errors: errors.length });
+    const filename = path.basename(String(req.body.filename || 'contacts.csv')).replace(/[^\w.-]+/g, '_').slice(0, 100) || 'contacts.csv';
+    const newRows = result.rows.filter((item) => item.status === 'New');
+    try {
+      db.transaction(() => {
+        for (const item of newRows) saveContact(item.contact, req.user, 'add');
+        audit(req.user, `import file · ${newRows.length} rows added`, 'file import', filename);
+      })();
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Import failed. No contacts, households, or import history were saved; you can retry the same file.' });
+    }
+    res.json({ rows: result.rows, added: newRows.length, duplicates: result.rows.filter((item) => item.status === 'Duplicate').length,
+      errors: 0, message: `Imported ${newRows.length} contact(s). ${result.rows.filter((item) => item.status === 'Duplicate').length} existing contact(s) were kept unchanged.` });
   });
 
   app.get('/api/audit', requireAuth, (_req, res) => {
@@ -928,15 +995,33 @@ function createApp(db) {
     res.json({ ...target, role });
   });
 
-  app.get('/api/export/contacts.csv', requireAuth, allowRoles('admin'), (_req, res) => {
-    const contacts = db.prepare('SELECT id, name, email, phone, household_id, tags, notes, email_opt_in, archived FROM contacts ORDER BY id').all();
+  function mayExport(user) {
+    if (user.role === 'admin') return true;
+    const setting = db.prepare("SELECT value FROM app_settings WHERE key = 'viewer_export_allowed'").get();
+    return user.role === 'viewer' && setting?.value === '1';
+  }
+
+  function exportContacts(req, res, emailList) {
+    if (!mayExport(req.user)) return res.status(403).json({ error: 'Your account is not allowed to export records.' });
+    const search = String(req.query.search || '').trim(); const tag = String(req.query.tag || '').trim().toLowerCase();
+    const archived = String(req.query.archived || 'false') === 'true'; const pattern = `%${search}%`;
+    const activeClause = emailList ? 'AND c.archived = 0 AND trim(c.email) <> \'\' AND c.email_opt_in = 1' : 'AND c.archived = ?';
+    const values = emailList ? [search, pattern, pattern, pattern, pattern, tag, tag] : [archived ? 1 : 0, search, pattern, pattern, pattern, pattern, tag, tag];
+    const contacts = db.prepare(`SELECT c.id, c.name, c.email, c.household_id, c.tags FROM contacts c
+      WHERE ${emailList ? '1 = 1' : '1 = 1'} ${activeClause}
+        AND (? = '' OR c.id LIKE ? COLLATE NOCASE OR c.name LIKE ? COLLATE NOCASE OR c.email LIKE ? COLLATE NOCASE OR c.phone LIKE ? COLLATE NOCASE)
+        AND (? = '' OR EXISTS (SELECT 1 FROM json_each(c.tags) WHERE lower(value) = ?)) ORDER BY c.name COLLATE NOCASE`).all(...values);
     const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
-    const lines = ['contact_id,name,email,phone,household,tags,notes,email_opt_in,archived', ...contacts.map((contact) => [
-      contact.id, contact.name, contact.email, contact.phone, contact.household_id, JSON.parse(contact.tags).join(', '), contact.notes,
-      contact.email_opt_in ? 'true' : 'false', contact.archived ? 'true' : 'false'
-    ].map(quote).join(','))];
-    res.type('text/csv').attachment('crm-contacts.csv').send(lines.join('\r\n'));
-  });
+    const headers = emailList ? ['name', 'email'] : ['contact_id', 'name', 'email', 'household'];
+    const lines = [headers.join(','), ...contacts.map((contact) => (emailList
+      ? [contact.name, contact.email] : [contact.id, contact.name, contact.email, contact.household_id]).map(quote).join(','))];
+    const file = emailList ? 'crm-email-list.csv' : 'crm-contacts.csv';
+    audit(req.user, `download ${emailList ? 'email list' : 'contacts CSV'} · ${contacts.length} rows`, 'file export', file);
+    res.type('text/csv').attachment(file).send(lines.join('\r\n'));
+  }
+
+  app.get('/api/export/contacts.csv', requireAuth, (req, res) => exportContacts(req, res, false));
+  app.get('/api/export/email-list.csv', requireAuth, (req, res) => exportContacts(req, res, true));
 
   app.use((error, _req, res, _next) => {
     console.error(error);

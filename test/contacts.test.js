@@ -234,39 +234,100 @@ test('archive hides C130 from the active list but retains its details, links, an
   assert.deepEqual(archivedList.data.map((item) => item.id), ['C130']);
 }));
 
-test('CSV import maps contact_id and household columns, skips existing IDs before validating them, and reports bad rows', async () => withClient(async (client) => {
-  const existing = await addContact(client, { id: 'C101', name: 'Saved version', email: 'saved@example.com', phone: '123' });
-  assert.equal(existing.response.status, 201);
-  const existingCsv = fs.readFileSync(path.join(__dirname, '..', 'data', 'client-data-1', 'data', 'contacts-existing.csv'), 'utf8');
-  const skipped = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: existingCsv } });
-  assert.equal(skipped.data.rows[0].status, 'skipped');
-  const preserved = (await client.request('/api/contacts/C101')).data;
-  assert.equal(preserved.name, 'Saved version');
-  assert.equal(preserved.email, 'saved@example.com');
-  const clean = fs.readFileSync(path.join(__dirname, '..', 'data', 'client-data-1', 'data', 'contacts-clean.csv'), 'utf8');
-  const cleanResult = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: clean } });
-  assert.equal(cleanResult.data.added, 2);
-  const alexCsv = (await client.request('/api/contacts/C001')).data;
-  assert.equal(alexCsv.household_id, 'H001');
-  assert.equal(alexCsv.email_opt_in, true);
-  const messy = fs.readFileSync(path.join(__dirname, '..', 'data', 'client-data-1', 'data', 'contacts-messy.csv'), 'utf8');
-  const errors = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: messy } });
-  assert.equal(errors.data.added, 1);
-  assert.equal(errors.data.errors, 4);
-  assert.equal(errors.data.skipped, 2);
-  const corrected = fs.readFileSync(path.join(__dirname, '..', 'data', 'client-data-1', 'data', 'contacts-corrected.csv'), 'utf8');
-  const imported = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected } });
-  assert.equal(imported.response.status, 200);
-  assert.equal(imported.data.added, 4);
-  assert.equal(imported.data.skipped, 2);
-  assert.equal(imported.data.errors, 0);
-  const jordan = (await client.request('/api/contacts/C003')).data;
-  assert.equal(jordan.household_id, 'H002');
-  assert.equal(jordan.email, 'jordan@example.com');
-  const parsed = parseCsv('contact_id,name,notes\r\nX1,"Name, with comma","quoted ""note"""');
-  assert.equal(parsed[0].name, 'Name, with comma');
-  assert.equal(parsed[0].notes, 'quoted "note"');
-  assert.equal((await client.request('/api/contacts/C007')).data.name, 'Alex Copy');
+test('CSV preview classifies clean and messy rows without saving; corrected imports are safe to replay', async () => withClient(async (client) => {
+  const dir = path.join(__dirname, '..', 'data', 'client-data-1', 'data');
+  const clean = fs.readFileSync(path.join(dir, 'contacts-clean.csv'), 'utf8');
+  const messy = fs.readFileSync(path.join(dir, 'contacts-messy.csv'), 'utf8');
+  const corrected = fs.readFileSync(path.join(dir, 'contacts-corrected.csv'), 'utf8');
+  const auditBefore = (await client.request('/api/audit')).data.length;
+  const cleanPreview = await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv: clean, filename: 'contacts-clean.csv' } });
+  assert.deepEqual(cleanPreview.data.rows.map((row) => row.status), ['New', 'New']);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 0);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM households').get().n, 0);
+  assert.equal((await client.request('/api/audit')).data.length, auditBefore);
+  const importedClean = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: clean, filename: 'contacts-clean.csv' } });
+  assert.equal(importedClean.data.added, 2);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 2);
+  assert.equal(client.db.prepare("SELECT COUNT(*) AS n FROM households WHERE id='H001'").get().n, 1);
+  assert.equal((await client.request('/api/contacts/C001')).data.email_opt_in, true);
+  assert.equal((await client.request('/api/contacts/C002')).data.email_opt_in, false);
+  const messyPreview = await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv: messy, filename: 'contacts-messy.csv' } });
+  assert.deepEqual(messyPreview.data.rows.map((row) => row.status), ['Duplicate', 'Error', 'Error', 'Error', 'Error', 'Error', 'Error']);
+  assert.equal(messyPreview.data.duplicates, 1);
+  assert.equal(messyPreview.data.errors, 6);
+  const rejected = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: messy, filename: 'contacts-messy.csv' } });
+  assert.equal(rejected.response.status, 400);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 2);
+  assert.equal(client.db.prepare("SELECT COUNT(*) AS n FROM contacts WHERE id='C003'").get().n, 0);
+  const preview = await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  assert.deepEqual(preview.data.rows.map((row) => row.status), ['Duplicate', 'New', 'New', 'New', 'New', 'New']);
+  const imported = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  assert.equal(imported.data.added, 5);
+  assert.equal(imported.data.duplicates, 1);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 7);
+  assert.deepEqual(client.db.prepare('SELECT id FROM households ORDER BY id').all().map((row) => row.id), ['H001', 'H002', 'H003', 'H004']);
+  assert.equal((await client.request('/api/contacts/C001')).data.name, 'Alex Rivera');
+  const replay = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  assert.equal(replay.data.added, 0);
+  assert.equal(replay.data.duplicates, 6);
+  const activities = (await client.request('/api/audit')).data.filter((item) => item.record_type === 'file import' && item.record_id === 'contacts-corrected.csv');
+  assert.equal(activities.length, 2);
+  assert.ok(activities.every((item) => item.actor_name === 'staff-demo' && item.action.includes('rows added')));
+}));
+
+test('CSV parsing handles reordered headers, quoted commas, doubled quotes, semicolon tags, and rejects bad headers', async () => withClient(async (client) => {
+  const reordered = 'notes,tags,household,email_opt_in,phone,email,name,contact_id\r\n"Note, with a comma and ""quotes""", donor; member,H009,,555-0155,comma@example.com,"Comma, Person",Q001';
+  const preview = await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv: reordered } });
+  assert.equal(preview.response.status, 200);
+  const saved = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: reordered } });
+  assert.equal(saved.data.added, 1);
+  const contact = (await client.request('/api/contacts/Q001')).data;
+  assert.equal(contact.notes, 'Note, with a comma and "quotes"');
+  assert.deepEqual(contact.tags, ['donor', 'member']);
+  assert.equal(contact.household_id, 'H009');
+  assert.equal(contact.email_opt_in, false);
+  for (const csv of [
+    'contact_id,name,email,phone,household,tags,notes\nX1,Name,,,,,',
+    'contact_id,name,email,phone,household,tags,notes,email_opt_in,extra\nX1,Name,,,,,,,',
+    'contact_id,name,email,phone,household,tags,notes,email_opt_in,email_opt_in\nX1,Name,,,,,,,',
+    'contact_id,name,email,phone,household,tags,notes,email_opt_in\nX1,Name,,\n'
+  ]) assert.equal((await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv } })).response.status, 400);
+}));
+
+test('full-data CSV replay skips C101 before invalid fields and preserves all linked records', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const before = (await client.request('/api/contacts/C101')).data;
+  assert.equal(before.name, 'Alex Rivera');
+  assert.equal(before.memberships.length, 1);
+  assert.equal(before.donations.length, 2);
+  assert.ok(before.tasks.length > 0);
+  const existing = fs.readFileSync(path.join(__dirname, '..', 'data', 'client-data-1', 'data', 'contacts-existing.csv'), 'utf8');
+  const preview = await client.request('/api/import/contacts-csv/preview', { method: 'POST', body: { csv: existing } });
+  assert.equal(preview.data.rows[0].status, 'Duplicate');
+  const result = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: existing, filename: 'contacts-existing.csv' } });
+  assert.equal(result.data.added, 0);
+  const after = (await client.request('/api/contacts/C101')).data;
+  assert.equal(after.name, 'Alex Rivera');
+  assert.equal(after.memberships.length, before.memberships.length);
+  assert.equal(after.donations.length, before.donations.length);
+  assert.equal(after.tasks.length, before.tasks.length);
+}));
+
+test('CSV import is atomic across contacts and households and succeeds on retry after a failed save', async () => withClient(async (client) => {
+  const dir = path.join(__dirname, '..', 'data', 'client-data-1', 'data');
+  const clean = fs.readFileSync(path.join(dir, 'contacts-clean.csv'), 'utf8');
+  const corrected = fs.readFileSync(path.join(dir, 'contacts-corrected.csv'), 'utf8');
+  await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: clean, filename: 'contacts-clean.csv' } });
+  client.db.exec("CREATE TRIGGER fail_second_csv_row AFTER INSERT ON contacts WHEN NEW.id = 'C004' BEGIN SELECT RAISE(ABORT, 'forced second-row failure'); END;");
+  const failed = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  assert.equal(failed.response.status, 500);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 2);
+  assert.deepEqual(client.db.prepare('SELECT id FROM households ORDER BY id').all().map((row) => row.id), ['H001']);
+  client.db.exec('DROP TRIGGER fail_second_csv_row');
+  const retry = await client.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  assert.equal(retry.data.added, 5);
+  assert.equal(client.db.prepare('SELECT COUNT(*) AS n FROM contacts').get().n, 7);
+  assert.deepEqual(client.db.prepare('SELECT id FROM households ORDER BY id').all().map((row) => row.id), ['H001', 'H002', 'H003', 'H004']);
 }));
 
 test('SQLite save persists phone and email permission across app restart without reseeding', async () => {
@@ -325,6 +386,67 @@ test('practice membership import gives the October 15 baseline counts and exact 
   const nextEndDate = (await client.request('/api/memberships/summary?date=2026-10-17')).data;
   assert.equal(nextEndDate.ended, 6);
   assert.equal(nextEndDate.active, 10);
+}));
+
+test('saved-data reports show October 15 totals and react to voids, new gifts, memberships, tasks, and dates', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const initial = (await client.request('/api/reports?date=2026-10-15')).data;
+  assert.deepEqual(initial.donations, { count: 20, total: 355 });
+  assert.deepEqual(initial.campaigns, [{ campaign: 'Campaign A', total: 155 }, { campaign: 'Campaign B', total: 200 }]);
+  assert.equal(initial.activeMemberships, 12);
+  assert.equal(initial.peopleCovered, 14);
+  assert.equal(initial.overdueTasks, 6);
+  assert.equal((await client.request('/api/reports?date=2026-10-10')).data.overdueTasks, 2);
+  await client.request('/api/donations/D002/void', { method: 'POST', body: {} });
+  const addGift = await client.request('/api/donations', { method: 'POST', body: { contact_id: 'C121', amount: 12, date: '2026-10-15', campaign: 'Campaign B', method: 'fake cash', payment_code: 'REPORT-GIFT-12' } });
+  assert.equal(addGift.response.status, 201);
+  const beforeGiftDate = (await client.request('/api/reports?date=2026-10-14')).data;
+  assert.equal(beforeGiftDate.donations.total, 330);
+  const afterGiftDate = (await client.request('/api/reports?date=2026-10-15')).data;
+  assert.equal(afterGiftDate.donations.total, 342);
+  assert.deepEqual(afterGiftDate.campaigns, [{ campaign: 'Campaign A', total: 130 }, { campaign: 'Campaign B', total: 212 }]);
+  const membership = await client.request('/api/memberships', { method: 'POST', body: { contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'REPORT-MEMBERSHIP', payment_date: '2026-10-15', method: 'fake cash', payment_status: 'paid' } });
+  assert.equal(membership.response.status, 201);
+  await client.request('/api/tasks/T006/complete', { method: 'POST', body: {} });
+  const changed = (await client.request('/api/reports?date=2026-10-15')).data;
+  assert.equal(changed.activeMemberships, 13);
+  assert.equal(changed.peopleCovered, 15);
+  assert.equal(changed.overdueTasks, 5);
+  assert.equal((await client.request('/api/reports?date=2026-02-30')).response.status, 400);
+}));
+
+test('email and contact exports match visible fields, enforce viewer permission, and record activity counts', async () => withClient(async (staff) => {
+  const directory = path.join(__dirname, '..', 'data', 'client-data-1', 'data');
+  const clean = fs.readFileSync(path.join(directory, 'contacts-clean.csv'), 'utf8');
+  const corrected = fs.readFileSync(path.join(directory, 'contacts-corrected.csv'), 'utf8');
+  await staff.request('/api/import/contacts-csv', { method: 'POST', body: { csv: clean, filename: 'contacts-clean.csv' } });
+  const viewer = await staff.loginAs('viewer-demo', 'ViewerDemo2026!');
+  const admin = await staff.loginAs('admin-demo', 'AdminDemo2026!');
+  const exportFor = async (cookie, route) => fetch(`${staff.baseUrl}${route}`, { headers: { cookie } });
+  const postFor = async (cookie, route, body) => fetch(`${staff.baseUrl}${route}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await exportFor(viewer.cookie, '/api/export/email-list.csv')).status, 403);
+  assert.equal((await postFor(viewer.cookie, '/api/import/contacts-csv/preview', { csv: clean })).status, 403);
+  const visibleContacts = (await staff.request('/api/contacts')).data;
+  const adminContacts = await exportFor(admin.cookie, '/api/export/contacts.csv');
+  assert.equal(adminContacts.status, 200);
+  const contactsCsv = parseCsv(await adminContacts.text());
+  assert.deepEqual(Object.keys(contactsCsv[0]), ['contact_id', 'name', 'email', 'household']);
+  assert.deepEqual(contactsCsv.map((row) => row.contact_id), visibleContacts.map((row) => row.id));
+  const adminEmailList = await exportFor(admin.cookie, '/api/export/email-list.csv');
+  assert.deepEqual(parseCsv(await adminEmailList.text()).map((row) => row.name), ['Alex Rivera']);
+  const enabled = await fetch(`${staff.baseUrl}/api/admin/settings/viewer-export`, { method: 'PATCH', headers: { cookie: admin.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ allowed: true }) });
+  assert.equal(enabled.status, 200);
+  const viewerEmail = await exportFor(viewer.cookie, '/api/export/email-list.csv');
+  assert.equal(viewerEmail.status, 200);
+  assert.deepEqual(parseCsv(await viewerEmail.text()).map((row) => row.name), ['Alex Rivera']);
+  await staff.request('/api/import/contacts-csv', { method: 'POST', body: { csv: corrected, filename: 'contacts-corrected.csv' } });
+  const correctedEmail = await exportFor(viewer.cookie, '/api/export/email-list.csv');
+  assert.deepEqual(parseCsv(await correctedEmail.text()).map((row) => row.name), ['Alex Rivera', 'Casey Park', 'Jordan Patel', 'Taylor Kim']);
+  const history = (await staff.request('/api/audit')).data.filter((entry) => ['file import', 'file export'].includes(entry.record_type));
+  assert.ok(history.some((entry) => entry.actor_name === 'staff-demo' && entry.record_type === 'file import' && entry.action.includes('2 rows added')));
+  assert.ok(history.some((entry) => entry.actor_name === 'admin-demo' && entry.record_type === 'file export' && entry.action.includes('2 rows')));
+  assert.ok(history.some((entry) => entry.actor_name === 'viewer-demo' && entry.record_type === 'file export' && entry.action.includes('4 rows')));
+  assert.ok(history.every((entry) => entry.occurred_at && entry.record_id.endsWith('.csv')));
 }));
 
 test('calendar anniversary handles leap day and December 31; 31-day and end-date counts are exact', async () => withClient(async (client) => {
@@ -650,21 +772,22 @@ test('viewers cannot change donations, tasks, or backup data; admin restore crea
   }
 });
 
-test('previous eight-menu structure remains and the unfinished CRM screens are still labeled honestly', () => {
+test('eight-menu app retains role controls and includes working CSV preview and saved-data reports', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const links = [...html.matchAll(/<a class="nav-link" href="#([^"]+)" data-screen="([^"]+)">/g)];
   assert.equal(links.length, 8);
   for (const [, hash, screen] of links) assert.equal(hash, screen);
-  for (const screen of ['reports']) {
-    const section = html.match(new RegExp(`<section class="screen placeholder-screen" id="screen-${screen}"[\\s\\S]*?<\\/section>`))?.[0] || '';
-    assert.match(section, /Not built yet/);
-  }
+  assert.match(html, /id="report-as-of" type="date"/);
+  for (const id of ['report-donation-total', 'report-active-memberships', 'report-covered-people', 'report-overdue-tasks']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const id of ['preview-csv', 'import-csv', 'cancel-csv-import', 'csv-preview-rows']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.match(html, /id="export-email-list"/);
   assert.match(html, /id="add-membership" type="button" hidden/);
   assert.match(html, /id="membership-plan-editor" hidden/);
   assert.match(html, /id="donation-form"/);
   assert.match(html, /id="task-form"/);
   assert.match(html, /id="backup-tools" hidden/);
+  assert.match(html, /id="viewer-export-allowed"/);
   assert.match(app, /function roleCanWrite\(\) \{ return currentUser && \['admin', 'staff'\]\.includes\(currentUser\.role\); \}/);
   assert.match(app, /user\.role !== 'admin'/);
   assert.match(app, /roleCanWrite\(\) \? `<button class="secondary-button renew-membership"/);
