@@ -502,7 +502,8 @@ function createApp(db) {
   app.get('/api/admin/backup', requireAuth, allowRoles('admin'), (_req, res) => {
     const tables = ['households', 'contacts', 'memberships', 'membership_plans', 'membership_payments', 'membership_periods', 'donations', 'tasks', 'audit_events'];
     const backup = { format: 'advanced-studies-crm-backup-v1', created_at: new Date().toISOString(), tables: {} };
-    for (const table of tables) backup.tables[table] = db.prepare(`SELECT * FROM ${table}`).all();
+    for (const table of tables) backup.tables[table] = db.prepare(`SELECT * FROM ${table}`).all().map((row) =>
+      table === 'audit_events' ? { ...row, actor_id: null } : row);
     res.type('application/json').attachment(`crm-backup-${new Date().toISOString().slice(0, 10)}.json`).send(JSON.stringify(backup, null, 2));
   });
 
@@ -536,7 +537,8 @@ function createApp(db) {
         .run(req.user.username, 'restore to separate copy', 'backup', path.basename(restoreFile));
       res.status(201).json({ message: 'Backup restored into a separate database copy. The current database was left unchanged.', file: restoreFile });
     } catch (error) {
-      restored.close(); fs.rmSync(restoreFile, { force: true });
+      restored.close();
+      for (const suffix of ['', '-wal', '-shm']) fs.rmSync(`${restoreFile}${suffix}`, { force: true });
       console.error(error); return res.status(400).json({ error: 'Restore failed. The current database was left unchanged.' });
     }
     restored.close();

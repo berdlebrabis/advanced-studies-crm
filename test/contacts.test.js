@@ -616,12 +616,16 @@ test('viewers cannot change donations, tasks, or backup data; admin restore crea
       assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM donations').get().count, before);
       assert.equal(staff.db.prepare("SELECT status FROM tasks WHERE id = 'T006'").get().status, 'open');
       assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count, beforeAudit);
+      const addedUser = await fetch(`${staff.baseUrl}/api/admin/users`, { method: 'POST', headers: { cookie: admin.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'backup-only-user', role: 'viewer', password: 'FakeBackupPass123' }) });
+      assert.equal(addedUser.status, 201);
       const backupResponse = await fetch(`${staff.baseUrl}/api/admin/backup`, { headers: { cookie: admin.cookie } });
       assert.equal(backupResponse.status, 200);
       const backup = await backupResponse.json();
       assert.equal(backup.tables.donations.length, 20);
       assert.equal(backup.tables.tasks.length, 21);
       assert.equal(backup.tables.tasks.filter((task) => task.type === 'manual').length, 15);
+      assert.ok(backup.tables.audit_events.every((change) => change.actor_id === null));
+      assert.ok(backup.tables.audit_events.some((change) => change.record_type === 'user' && change.action === 'create user'));
       const originalAuditCount = staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count;
       const restoredResponse = await bodyRequest(admin.cookie, '/api/admin/restore', backup);
       assert.equal(restoredResponse.status, 201);
