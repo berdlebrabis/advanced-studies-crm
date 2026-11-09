@@ -1,0 +1,3 @@
+contact_id,name,email,phone,household,tags,notes,email_opt_in
+C101,Should Not Replace,not-an-email,,,member,Existing ID must be skipped before other validation,maybe
+

@@ -1,0 +1,4 @@
+contact_id,name,email,phone,household,tags,notes,email_opt_in
+C001,Alex Rivera,alex@example.com,555-0101,H001,member,Test contact,true
+C002,Sam Lee,sam@example.com,555-0102,H001,donor,No email,false
+

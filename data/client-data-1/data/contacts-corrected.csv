@@ -1,0 +1,8 @@
+contact_id,name,email,phone,household,tags,notes,email_opt_in
+C001,Alex Updated,alex@example.com,555-0101,H001,member,Existing ID,true
+C003,Jordan Patel,jordan@example.com,555-0103,H002,donor,New contact,true
+C004,Casey Park,casey@example.com,555-0104,H002,member,Missing name,true
+C005,Taylor Kim,taylor@example.com,555-0105,H003,donor,Bad email,true
+C006,Morgan Chen,morgan@example.com,555-0106,H003,member,Bad consent,false
+C007,Alex Copy,alex.copy@example.com,555-0108,H004,donor,Reused email,false
+

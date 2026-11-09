@@ -1,10 +1,10 @@
-# Advanced Studies CRM — Contact Management
+# Advanced Studies CRM — Contact Manager Practice Build
 
-Existing Node.js + Express + SQLite CRM, using the original browser UI and class practice data.
+A small local nonprofit CRM built with Node.js, Express, SQLite, and plain browser HTML, CSS, and JavaScript.
 
 ## How to run this app
 
-Install **Node.js 22+** and npm. In the project folder, run:
+Requirements: Node.js 20 or newer and npm. In PowerShell, open this project folder, install dependencies, and start the app:
 
 ```powershell
 npm install
@@ -12,21 +12,28 @@ $env:PORT = 3001
 npm start
 ```
 
-Open **http://localhost:3001** in a browser. On macOS/Linux use `PORT=3001 npm start` instead. The default port without the override is 3000.
+Open <http://localhost:3001>. Stop the server with Ctrl+C. Run the automated tests with `npm test`.
 
-Sign in with these **fictional local test accounts only**:
+The SQLite database stays at `data/crm.sqlite` between runs. Normal startup does not clear saved records. The supplied practice files are kept under `data/client-data-1/data/`; the original `data/crm-classroom-test-data.json` remains untouched. After signing in as admin or staff, choose **Contacts → Load 30 practice contacts**. The import adds missing IDs and leaves contacts already saved in the database unchanged. It can be repeated safely.
 
-| Username | Password | Access |
-| --- | --- | --- |
-| admin-demo | demo-admin | Read and edit contacts |
-| staff-demo | demo-staff | Read and edit contacts |
-| viewer-demo | demo-viewer | Read only |
+### Fake sign-in accounts
 
-Open **Login / Settings** and click **Load missing practice contacts**. This adds the 30 fictional contacts and five households from `data/crm-classroom-test-data.json` without overwriting already-saved contacts. Loading twice is safe. To archive C130, open that contact and choose Archive. The active list then shows 29 if the initial 30 are the only contacts. Archived records stay in SQLite and remain retrievable by ID.
+These are local practice accounts; do not reuse their passwords elsewhere.
 
-Search by name or ID, select a tag, open a contact to see household members, and use Edit / Save / Cancel. The change history is in Login / Settings. Viewer sign-in is read-only, including server-side checks.
+- **Admin:** `admin-demo` / `AdminDemo2026!`
+- **Staff:** `staff-demo` / `StaffDemo2026!`
+- **Viewer:** `viewer-demo` / `ViewerDemo2026!`
 
-**Saved data:** `data/crm.sqlite` (or `CRM_DB_PATH` when set). Normal startup does not reseed or delete data. Keep your local SQLite database out of Git. Never use real contact information with the fixed demo passwords.
+Admin can manage users, set roles, and export contacts. Staff can add, edit, archive, and import contacts. Viewers can read records. The API checks permissions on every protected request. Passwords are stored as salted hashes and sessions use HttpOnly cookies.
+
+### Contact and import tools
+
+- Edit preserves the contact ID. Names and other text values are trimmed. Email can be empty; a nonempty email must be valid and unique without regard to case.
+- Search contacts by name, ID, email, or phone; filter by tag; select **Show archived** to find archived records. Open a household link to see its people.
+- The contact CSV importer maps `contact_id` to the contact ID and `household` to the household link. Existing IDs are skipped before other row validation so existing records are not overwritten. Invalid rows show a reason.
+- Archive hides a person from the active list while keeping the row, notes, household, and related records. Contact change history shows the actor, action, record, and time.
+
+Membership entry, donations, tasks, and their management screens are not built yet. Existing table slots remain, but the practice-data loader in this build imports contacts and households only.
 
 ## Tests
 
@@ -34,4 +41,3 @@ Search by name or ID, select a tag, open a contact to see household members, and
 npm test
 ```
 
-Tests use an in-memory database, not the saved app database. The CRM's original membership, donation, task, and report screens are **not built yet**. User management, settings editing, import of CSV files, export, backup, and restore are **not built yet**. The practice-data loader imports the JSON contacts and households only. The fixed demo sign-in is for classroom practice, not production authentication.

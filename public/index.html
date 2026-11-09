@@ -9,7 +9,7 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <div class="shell">
+  <div class="shell signed-out" inert>
     <aside class="sidebar">
       <a class="brand" href="#dashboard" aria-label="Advanced Studies CRM dashboard">
         <span class="brand-mark" aria-hidden="true">A</span>
@@ -28,14 +28,15 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="demo-note"><span class="demo-dot" aria-hidden="true"></span><div><strong>Classroom demo</strong><small>Fictional sample records</small></div></div>
-        <div class="user-card"><span class="avatar" aria-hidden="true">AS</span><span><strong>Staff workspace</strong><small>Local preview</small></span></div>
+        <div class="user-card"><span class="avatar" aria-hidden="true" id="user-avatar">AS</span><span><strong id="signed-in-name">Signed out</strong><small id="signed-in-role">No active session</small></span></div>
+        <button class="secondary-button signout-button" id="sign-out" type="button" hidden>Sign out</button>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div class="crumb">Workspace <span>/</span> <span id="current-page">Dashboard</span></div>
-        <div class="top-actions"><span class="date-chip" id="test-date">Demo records</span></div>
+        <div class="top-actions"><span class="date-chip" id="test-date">Demo records</span><span class="role-chip" id="role-chip" hidden></span></div>
       </header>
 
       <section class="screen" id="screen-dashboard" data-title="Dashboard" hidden>
@@ -53,9 +54,10 @@
       <section class="screen" id="screen-contacts" data-title="Contacts" hidden>
         <div class="page-heading"><div><p class="eyebrow">PEOPLE & HOUSEHOLDS</p><h1>Contacts</h1><p class="subhead">Search and open saved people.</p></div><button class="primary-button" data-add-contact><span aria-hidden="true">＋</span>Add Contact</button></div>
         <article class="panel people-panel">
-          <div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="contact-search" type="search" placeholder="Search by name or contact ID" autocomplete="off"><button type="button" class="clear-search" id="clear-search" hidden>Clear</button></label><label for="tag-filter">Tag</label><select id="tag-filter"><option value="">All tags</option></select><button class="filter-button" id="filter-households" type="button">☷ <span>All contacts</span></button></div>
+          <div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="contact-search" type="search" placeholder="Search by name or contact ID" autocomplete="off"><button type="button" class="clear-search" id="clear-search" hidden>Clear</button></label><label class="select-filter">Tag <select id="tag-filter"><option value="">All tags</option></select></label><label class="select-filter"><input id="archived-filter" type="checkbox"> Show archived</label></div>
+          <div class="import-tools" id="contact-import-tools" hidden><button class="secondary-button" id="load-practice-data" type="button">Load 30 practice contacts</button><label class="secondary-button file-button" for="csv-import-file">Import contacts CSV</label><input id="csv-import-file" type="file" accept=".csv,text/csv" hidden><button class="secondary-button" id="export-contacts" type="button" hidden>Export contacts CSV</button></div>
           <p class="inline-message" id="contact-message" role="status" aria-live="polite"></p>
-          <div class="table-wrap"><table><thead><tr><th>CONTACT ID</th><th>NAME</th><th>EMAIL</th><th>HOUSEHOLD</th><th>OPEN</th></tr></thead><tbody id="contact-rows"><tr><td colspan="5" class="loading">Loading contacts…</td></tr></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>CONTACT ID</th><th>NAME</th><th>EMAIL</th><th>HOUSEHOLD</th><th>OPEN</th></tr></thead><tbody id="contact-rows"><tr><td colspan="5" class="loading">Sign in to view contacts.</td></tr></tbody></table></div>
           <div class="panel-foot"><span id="showing-count">Loading contacts</span><button class="pagination" id="show-all" type="button" hidden>Show all</button></div>
         </article>
       </section>
@@ -69,35 +71,32 @@
       <section class="screen placeholder-screen" id="screen-donations" data-title="Donations" hidden><p class="eyebrow">GIVING</p><h1>Donations</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Donation entry and saved gifts will appear here after donation entry is built.</p></article></section>
       <section class="screen placeholder-screen" id="screen-tasks" data-title="Tasks" hidden><p class="eyebrow">FOLLOW-UP</p><h1>Tasks</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Contact tasks, owners, due dates, and completion will appear here after tasks are built.</p></article></section>
       <section class="screen placeholder-screen" id="screen-reports" data-title="Reports" hidden><p class="eyebrow">SAVED RECORDS</p><h1>Reports</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Reports will use saved records only. No sample totals are shown here.</p></article></section>
-      <section class="screen" id="screen-settings" data-title="Login / Settings" hidden>
-<p class="eyebrow">WORKSPACE ACCESS</p><h1>Login / Settings</h1>
-<article class="panel empty-panel" id="sign-in-panel"><h2>Sign in (fictional accounts)</h2>
-<form id="sign-in-form"><label for="username">Test username</label><input id="username" name="username" required placeholder="admin-demo">
-<label for="password">Test password</label><input id="password" name="password" type="password" required placeholder="demo-admin">
-<button class="primary-button" type="submit">Sign in</button><p id="auth-message" role="alert"></p></form>
-<p>Try admin-demo / demo-admin, staff-demo / demo-staff, or viewer-demo / demo-viewer.</p></article>
-<article class="panel empty-panel" id="signed-in-panel" hidden><h2>Signed in</h2><p id="current-user"></p><button class="secondary-button" id="sign-out">Sign out</button><button class="primary-button" id="load-practice">Load missing practice contacts</button>
-<p>Existing saved contacts are never overwritten by the practice loader.</p><h2>Recent change history</h2><ol id="audit-entries"></ol><p>User management and other settings are not built yet.</p></article>
-</section>
+      <section class="screen placeholder-screen" id="screen-settings" data-title="Login / Settings" hidden><p class="eyebrow">WORKSPACE ACCESS</p><h1>Login / Settings</h1><article class="panel settings-panel"><h2>Account and permissions</h2><p id="settings-summary">Sign in to view account settings.</p><section id="user-management" hidden><h3>Manage users <small>Admin only</small></h3><form id="new-user-form" class="inline-form"><label>Username<input name="username" required autocomplete="off"></label><label>Role<select name="role"><option value="viewer">Viewer</option><option value="staff">Staff</option><option value="admin">Admin</option></select></label><label>Temporary password<input name="password" type="password" minlength="10" required autocomplete="new-password"></label><button class="primary-button" type="submit">Add user</button></form><p class="inline-message" id="user-message" role="status"></p><div id="user-list"></div></section></article><article class="panel settings-panel"><h2>Recent change history</h2><p class="subhead">Shows who changed a record, the action, and when.</p><div id="audit-list"></div></article></section>
 
-      <footer>Advanced Studies CRM <span>•</span> Fictional classroom records <span class="footer-right">CRM 1 · Contact Starter</span></footer>
+      <footer>Advanced Studies CRM <span>•</span> Fictional practice records <span class="footer-right">Contact Manager Practice Build</span></footer>
     </main>
   </div>
 
+  <section id="auth-gate" class="auth-gate" aria-labelledby="login-title">
+    <form id="login-form" class="auth-card"><p class="eyebrow">ADVANCED STUDIES CRM</p><h1 id="login-title">Sign in</h1><p class="subhead">Use one of the fake practice accounts to open the local CRM.</p><label for="login-username">Username</label><input id="login-username" name="username" required autocomplete="username"><label for="login-password">Password</label><input id="login-password" name="password" type="password" required autocomplete="current-password"><p class="form-message" id="login-message" role="alert" aria-live="assertive"></p><button class="primary-button" type="submit">Sign in</button><p class="demo-credentials"><strong>Practice accounts</strong><br>admin-demo · AdminDemo2026!<br>staff-demo · StaffDemo2026!<br>viewer-demo · ViewerDemo2026!</p></form>
+  </section>
+
   <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-dialog-title">
     <form id="contact-form" novalidate>
-      <div class="dialog-top"><div><p class="eyebrow">ADD TO YOUR COMMUNITY</p><h2 id="contact-dialog-title">Add Contact</h2></div><button class="close-button" type="button" id="close-dialog" aria-label="Close form">×</button></div>
+      <div class="dialog-top"><div><p class="eyebrow">COMMUNITY RECORD</p><h2 id="contact-dialog-title">Add Contact</h2></div><button class="close-button" type="button" id="close-dialog" aria-label="Close form">×</button></div>
       <label for="contact-id">Contact ID</label><input id="contact-id" name="id" required autocomplete="off" placeholder="e.g. C101">
       <label for="contact-name">Name</label><input id="contact-name" name="name" required autocomplete="name" placeholder="Full name">
       <label for="contact-email">Email</label><input id="contact-email" name="email" type="email" autocomplete="email" placeholder="name@example.org">
       <label for="contact-phone">Phone</label><input id="contact-phone" name="phone" type="tel" autocomplete="tel" placeholder="(555) 000-0000">
-      <label for="contact-household">Household</label><select id="contact-household" name="household_id"><option value="">No household</option></select>
+      <label for="contact-household">Household</label><select id="contact-household" name="household_id"><option value="">No household</option><option value="__new__">Create a new household…</option></select>
+      <div id="new-household-fields" hidden><label for="new-household-id">New household ID</label><input id="new-household-id" name="new_household_id" autocomplete="off" placeholder="e.g. H106"><label for="new-household-name">New household name</label><input id="new-household-name" name="household_name" autocomplete="off" placeholder="Household name"></div>
       <label for="contact-tags">Tags <span class="field-hint">comma separated</span></label><input id="contact-tags" name="tags" placeholder="member, donor">
       <label for="contact-notes">Notes</label><textarea id="contact-notes" name="notes" rows="3" placeholder="Notes about this person"></textarea>
-      <label class="checkbox-label" for="contact-email-opt-in"><input id="contact-email-opt-in" name="email_opt_in" type="checkbox"><span>May we email you? (starts at No)</span></label>
+      <label class="checkbox-label" for="contact-email-opt-in"><input id="contact-email-opt-in" name="email_opt_in" type="checkbox"><span>May we email you? Yes (unchecked = No)</span></label>
       <p class="form-message" id="form-message" role="alert" aria-live="assertive" aria-atomic="true"></p>
       <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-contact">Cancel</button><button class="primary-button" type="submit">Save</button></div>
     </form>
   </dialog>
 </body>
 </html>
+
