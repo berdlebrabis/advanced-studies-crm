@@ -45,6 +45,8 @@ function setScreen(screenName) {
   document.title = `${section.dataset.title} · Advanced Studies CRM`;
   if (location.hash !== `#${nextScreen}`) history.replaceState(null, '', `#${nextScreen}`);
   if (nextScreen === 'memberships' && currentUser) loadMembershipData().catch(showMembershipError);
+  if (nextScreen === 'donations' && currentUser) loadDonations().catch((error) => showScreenError('#donation-message', error));
+  if (nextScreen === 'tasks' && currentUser) loadTasks().catch((error) => showScreenError('#task-message', error));
 }
 
 function roleCanWrite() { return currentUser && ['admin', 'staff'].includes(currentUser.role); }
@@ -66,6 +68,9 @@ function setSignedIn(user) {
   document.querySelector('#user-management').hidden = user.role !== 'admin';
   document.querySelector('#add-membership').hidden = !roleCanWrite();
   document.querySelector('#membership-plan-editor').hidden = user.role !== 'admin';
+  document.querySelector('#add-donation').hidden = !roleCanWrite();
+  document.querySelector('#add-task').hidden = !roleCanWrite();
+  document.querySelector('#backup-tools').hidden = user.role !== 'admin';
   document.querySelector('#settings-summary').textContent = `Signed in as ${user.username} (${user.role}).`;
 }
 
@@ -145,6 +150,49 @@ function showMembershipError(error) {
   const message = document.querySelector('#membership-message');
   message.textContent = error.message;
   message.hidden = false;
+}
+
+function showScreenError(selector, error) { const node = document.querySelector(selector); node.textContent = error.message; node.hidden = false; }
+
+function renderDonations(result) {
+  const campaign = document.querySelector('#donation-campaign');
+  const selected = campaign.value;
+  campaign.innerHTML = '<option value="">All campaigns</option>' + result.campaigns.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  campaign.value = result.campaigns.includes(selected) ? selected : '';
+  document.querySelector('#donation-summary').textContent = `${money.format(result.summary.total)} from ${result.summary.count} non-void gifts`;
+  const target = document.querySelector('#donation-rows');
+  if (!result.donations.length) { target.innerHTML = '<tr><td colspan="8" class="empty">No gifts found for these filters.</td></tr>'; return; }
+  target.innerHTML = result.donations.map((item) => `<tr class="${item.voided ? 'voided-row' : ''}"><td>${escapeHtml(item.id)}</td><td><button type="button" class="text-link" data-open-contact="${escapeHtml(item.contact_id)}">${escapeHtml(item.donor_name)}</button></td><td>${money.format(item.amount)}</td><td>${escapeHtml(item.date)}</td><td>${escapeHtml(item.campaign)}</td><td>${escapeHtml(item.method)} · ${escapeHtml(item.payment_code || '')}</td><td>${item.thank_you_sent ? 'Sent' : 'Needed'}${item.voided ? `<br>Voided by ${escapeHtml(item.voided_by || 'staff')} · ${escapeHtml(item.voided_at || '')}` : ''}</td><td>${!item.voided && roleCanWrite() ? `<button class="secondary-button void-donation" type="button" data-void-donation="${escapeHtml(item.id)}">Void</button>` : item.voided ? '<span class="membership-status status-ended">Void</span>' : '—'}<details class="membership-history"><summary>History (${item.history.length})</summary><ul>${item.history.map((change) => `<li>${escapeHtml(change.action)} · ${escapeHtml(change.actor_name)} · ${escapeHtml(dateFormat.format(new Date(change.occurred_at)))}</li>`).join('') || '<li>No change history.</li>'}</ul></details></td></tr>`).join('');
+}
+
+async function loadDonations() {
+  const params = new URLSearchParams();
+  const campaign = document.querySelector('#donation-campaign').value;
+  const from = document.querySelector('#donation-from').value; const to = document.querySelector('#donation-to').value;
+  if (campaign) params.set('campaign', campaign); if (from) params.set('from', from); if (to) params.set('to', to);
+  renderDonations(await api(`/api/donations?${params}`));
+}
+
+function renderTasks(result) {
+  const count = result.counts;
+  document.querySelector('#task-summary').textContent = `${count.total} manual tasks · ${count.complete} complete · ${count.open} open · ${count.overdue} overdue; ${result.allCounts.total - count.total} follow-up tasks total · as of ${result.asOf}`;
+  const target = document.querySelector('#task-rows');
+  if (!result.tasks.length) { target.innerHTML = '<tr><td colspan="8" class="empty">No tasks saved yet.</td></tr>'; return; }
+  target.innerHTML = result.tasks.map((task) => `<tr class="${task.status === 'open' && task.due_date < result.asOf ? 'overdue-row' : ''}"><td>${escapeHtml(task.id)}</td><td><button type="button" class="text-link" data-open-contact="${escapeHtml(task.contact_id)}">${escapeHtml(task.contact_name)}</button></td><td>${escapeHtml(task.type)}</td><td>${escapeHtml(task.title)}<details class="membership-history"><summary>History (${task.history.length})</summary><ul>${task.history.map((change) => `<li>${escapeHtml(change.action)} · ${escapeHtml(change.actor_name)} · ${escapeHtml(dateFormat.format(new Date(change.occurred_at)))}</li>`).join('') || '<li>No change history.</li>'}</ul></details></td><td>${escapeHtml(task.owner)}</td><td>${escapeHtml(task.due_date || '—')}</td><td>${escapeHtml(task.status)}${task.status === 'open' && task.due_date < result.asOf ? ' · overdue' : ''}</td><td>${task.status === 'open' && roleCanWrite() ? `<button class="secondary-button complete-task" type="button" data-task-action="complete" data-task-id="${escapeHtml(task.id)}">Complete</button> <button class="secondary-button void-donation" type="button" data-task-action="cancel" data-task-id="${escapeHtml(task.id)}">Cancel</button>` : '—'}</td></tr>`).join('');
+}
+
+async function loadTasks() {
+  const asOf = document.querySelector('#task-as-of').value || practiceDate;
+  if (roleCanWrite()) await api('/api/tasks/ensure-followups', { method: 'POST', body: JSON.stringify({ date: asOf }) });
+  renderTasks(await api(`/api/tasks?date=${encodeURIComponent(asOf)}`));
+}
+
+async function loadFormContacts(selectors) {
+  const people = await api('/api/contacts?archived=false');
+  for (const selector of selectors) {
+    const select = document.querySelector(selector);
+    select.innerHTML = '<option value="">Choose a contact</option>' + people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)} · ${escapeHtml(person.id)}</option>`).join('');
+  }
 }
 
 function membershipHistoryText(items) {
@@ -248,7 +296,10 @@ async function openContact(contactId) {
   document.querySelector('#contact-detail-card').innerHTML = `${showContactActions(contact)}
     <dl class="detail-grid">${details.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
     <section class="linked-records"><h2>Household people</h2><div id="detail-household-people">${contact.household_id ? 'Loading household…' : '<p>No household linked.</p>'}</div></section>
-    <section class="linked-records"><h2>Linked records</h2><p>Memberships: ${contact.memberships.length ? contact.memberships.length : 'none saved yet'}</p><p>Donations: ${contact.donations.length ? contact.donations.length : 'none saved yet'}</p><p>Tasks: ${contact.tasks.length ? contact.tasks.length : 'none saved yet'}</p></section>
+    <section class="linked-records"><h2>Linked records</h2>
+      <h3>Memberships (${contact.memberships.length})</h3><ul class="record-history">${contact.memberships.map((item) => `<li>${escapeHtml(item.plan)} · ${money.format(item.price)} · ${escapeHtml(item.payment_status)} · ${escapeHtml(item.start_date || 'no start date')} to ${escapeHtml(item.end_date || 'no end date')}</li>`).join('') || '<li>None saved yet.</li>'}</ul>
+      <h3>Donations (${contact.donations.length})</h3><ul class="record-history">${contact.donations.map((item) => `<li>${escapeHtml(item.id)} · ${money.format(item.amount)} · ${escapeHtml(item.date)} · ${escapeHtml(item.campaign)} · ${item.voided ? 'Void' : 'Saved'}</li>`).join('') || '<li>None saved yet.</li>'}</ul>
+      <h3>Tasks (${contact.tasks.length})</h3><ul class="record-history">${contact.tasks.map((item) => `<li>${escapeHtml(item.id)} · ${escapeHtml(item.type)} · ${escapeHtml(item.title)} · due ${escapeHtml(item.due_date || 'no date')} · ${escapeHtml(item.status)}</li>`).join('') || '<li>None saved yet.</li>'}</ul></section>
     <section class="linked-records"><h2>Change history</h2>${showHistory(contact.history)}</section>`;
   if (contact.household_id) {
     try {
@@ -361,6 +412,60 @@ document.querySelector('#membership-rows').addEventListener('click', (event) => 
     const membership = memberships.find((item) => item.id === renewButton.dataset.renewMembership);
     if (membership) openRenewDialog(membership);
   } else if (contactButton) openContact(contactButton.dataset.openContact).catch(showMembershipError);
+});
+document.querySelector('#donation-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-void-donation]');
+  const contactButton = event.target.closest('[data-open-contact]');
+  if (contactButton) return openContact(contactButton.dataset.openContact).catch(showError);
+  if (!button || !confirm(`Void donation ${button.dataset.voidDonation}? It will remain in history but leave totals.`)) return;
+  try { const result = await api(`/api/donations/${encodeURIComponent(button.dataset.voidDonation)}/void`, { method: 'POST', body: '{}' }); document.querySelector('#donation-message').textContent = result.message; await loadDonations(); await refreshData(); }
+  catch (error) { showScreenError('#donation-message', error); }
+});
+document.querySelector('#task-rows').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-task-action]');
+  const contactButton = event.target.closest('[data-open-contact]');
+  if (contactButton) return openContact(contactButton.dataset.openContact).catch(showError);
+  if (!button) return;
+  try { const result = await api(`/api/tasks/${encodeURIComponent(button.dataset.taskId)}/${button.dataset.taskAction}`, { method: 'POST', body: '{}' }); document.querySelector('#task-message').textContent = result.message; await loadTasks(); await refreshData(); }
+  catch (error) { showScreenError('#task-message', error); }
+});
+document.querySelector('#filter-donations').addEventListener('click', () => loadDonations().catch((error) => showScreenError('#donation-message', error)));
+document.querySelector('#donation-campaign').addEventListener('change', () => loadDonations().catch((error) => showScreenError('#donation-message', error)));
+document.querySelector('#task-as-of').addEventListener('change', () => loadTasks().catch((error) => showScreenError('#task-message', error)));
+document.querySelector('#add-donation').addEventListener('click', async () => {
+  try { await loadFormContacts(['#donation-contact']); const form = document.querySelector('#donation-form'); form.reset(); document.querySelector('#donation-form-message').textContent = ''; document.querySelector('#donation-date').value = practiceDate; document.querySelector('#donation-dialog').showModal(); }
+  catch (error) { showScreenError('#donation-message', error); }
+});
+document.querySelector('#close-donation-dialog').addEventListener('click', () => document.querySelector('#donation-dialog').close());
+document.querySelector('#cancel-donation').addEventListener('click', () => document.querySelector('#donation-dialog').close());
+document.querySelector('#donation-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget; const message = document.querySelector('#donation-form-message'); message.textContent = '';
+  const data = Object.fromEntries(new FormData(form)); data.thank_you_sent = form.elements.thank_you_sent.checked;
+  try { const result = await api('/api/donations', { method: 'POST', body: JSON.stringify(data) }); document.querySelector('#donation-dialog').close(); form.reset(); document.querySelector('#donation-message').textContent = result.message; await loadDonations(); await refreshData(); }
+  catch (error) { message.textContent = error.message; }
+});
+document.querySelector('#add-task').addEventListener('click', async () => {
+  try { await loadFormContacts(['#task-contact']); const form = document.querySelector('#task-form'); form.reset(); document.querySelector('#task-form-message').textContent = ''; document.querySelector('#task-owner').value = currentUser.username; document.querySelector('#task-due-date').value = document.querySelector('#task-as-of').value || practiceDate; document.querySelector('#task-dialog').showModal(); }
+  catch (error) { showScreenError('#task-message', error); }
+});
+document.querySelector('#close-task-dialog').addEventListener('click', () => document.querySelector('#task-dialog').close());
+document.querySelector('#cancel-task').addEventListener('click', () => document.querySelector('#task-dialog').close());
+document.querySelector('#task-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); const form = event.currentTarget; const message = document.querySelector('#task-form-message'); message.textContent = '';
+  try { const result = await api('/api/tasks', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); document.querySelector('#task-dialog').close(); form.reset(); document.querySelector('#task-message').textContent = result.message; await loadTasks(); await refreshData(); }
+  catch (error) { message.textContent = error.message; }
+});
+document.querySelector('#download-backup').addEventListener('click', async () => {
+  const message = document.querySelector('#backup-message'); message.textContent = '';
+  try { const response = await fetch('/api/admin/backup', { credentials: 'same-origin' }); if (!response.ok) throw new Error((await response.json()).error || 'Backup failed.'); const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = 'crm-backup.json'; link.click(); URL.revokeObjectURL(url); message.textContent = 'Backup downloaded.'; }
+  catch (error) { message.textContent = error.message; }
+});
+document.querySelector('#restore-backup-file').addEventListener('change', async (event) => {
+  const file = event.target.files[0]; if (!file) return;
+  const message = document.querySelector('#backup-message'); message.textContent = '';
+  try { const backup = JSON.parse(await file.text()); const result = await api('/api/admin/restore', { method: 'POST', body: JSON.stringify(backup) }); message.textContent = `${result.message} Copy: ${result.file}`; }
+  catch (error) { message.textContent = error.message; }
+  finally { event.target.value = ''; }
 });
 document.querySelector('#membership-as-of').addEventListener('change', () => loadMembershipData().catch(showMembershipError));
 document.querySelector('#add-membership').addEventListener('click', () => loadMembershipData().then(openMembershipDialog).catch(showMembershipError));
@@ -494,6 +599,8 @@ document.querySelector('#login-form').addEventListener('submit', async (event) =
     await Promise.all([loadHouseholdOptions(), loadTags()]);
     await refreshData();
     if (location.hash === '#memberships') await loadMembershipData();
+    if (location.hash === '#donations') await loadDonations();
+    if (location.hash === '#tasks') await loadTasks();
     if (user.role === 'admin' && location.hash === '#settings') loadSettings();
     document.querySelector('#contact-search').focus();
   } catch (error) { showError(error, '#login-message'); }

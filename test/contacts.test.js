@@ -519,18 +519,148 @@ test('only admins change plan prices; historical paid prices remain fixed and au
   assert.equal(audited.action, 'change plan price');
 }));
 
+test('donation import totals exclude membership fees; void keeps D002 in history and filters include both date boundaries', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const all = await client.request('/api/donations?from=2026-10-01&to=2026-10-10');
+  assert.deepEqual(all.data.summary, { count: 20, total: 355 });
+  assert.equal((await client.request('/api/donations?campaign=Campaign%20A&from=2026-10-01&to=2026-10-10')).data.summary.total, 155);
+  assert.equal((await client.request('/api/donations?campaign=Campaign%20B&from=2026-10-01&to=2026-10-10')).data.summary.total, 200);
+  const invalid = await client.request('/api/donations', { method: 'POST', body: { contact_id: 'C101', amount: 0, date: '2026-10-15', campaign: 'Campaign B', method: 'cash', payment_code: 'INVALID' } });
+  assert.equal(invalid.response.status, 400);
+  assert.equal((await client.request('/api/donations')).data.donations.length, 20);
+  assert.equal((await client.request('/api/donations?from=2026-10-15&to=2026-10-15')).data.summary.total, 0);
+  const voided = await client.request('/api/donations/D002/void', { method: 'POST', body: {} });
+  assert.equal(voided.response.status, 200);
+  const history = (await client.request('/api/donations')).data.donations.find((item) => item.id === 'D002');
+  assert.equal(history.voided, 1);
+  assert.equal(history.voided_by, 'staff-demo');
+  assert.ok(history.voided_at);
+  assert.equal((await client.request('/api/donations')).data.donations.length, 20);
+  assert.equal((await client.request('/api/donations')).data.summary.total, 330);
+  assert.equal((await client.request('/api/donations?campaign=Campaign%20A')).data.summary.total, 130);
+  assert.equal((await client.request('/api/donations?campaign=Campaign%20B')).data.summary.total, 200);
+  const added = await client.request('/api/donations', { method: 'POST', body: { contact_id: 'C121', amount: 12, date: '2026-10-15', campaign: 'Campaign B', method: 'fake cash', payment_code: 'PRACTICE-ADD-12' } });
+  assert.equal(added.response.status, 201);
+  assert.equal((await client.request('/api/donations?campaign=Campaign%20B&from=2026-10-15&to=2026-10-15')).data.summary.total, 12);
+  assert.equal((await client.request('/api/donations')).data.summary.total, 342);
+  const duplicate = await client.request('/api/donations', { method: 'POST', body: { contact_id: 'C121', amount: 12, date: '2026-10-15', campaign: 'Campaign B', method: 'cash', payment_code: 'PRACTICE-ADD-12' } });
+  assert.equal(duplicate.response.status, 409);
+  assert.equal((await client.request('/api/donations')).data.donations.length, 21);
+  const thankYou = (await client.request('/api/tasks?date=2026-10-15')).data.tasks.find((task) => task.source_key === `donation:${added.data.id}:thank-you`);
+  assert.equal(thankYou.due_date, '2026-10-22');
+  assert.equal(thankYou.owner, 'staff-demo');
+  await client.request(`/api/donations/${added.data.id}/void`, { method: 'POST', body: {} });
+  const cancelled = (await client.request('/api/tasks?date=2026-10-15')).data.tasks.find((task) => task.id === thankYou.id);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.ok((await client.request('/api/audit')).data.some((entry) => entry.record_type === 'donation' && entry.record_id === 'D002' && entry.action === 'void'));
+}));
+
+test('manual task baseline and completion update counts and overdue status against the chosen date', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const baseline = (await client.request('/api/tasks?date=2026-10-15')).data;
+  assert.equal(baseline.counts.total, 15);
+  assert.equal(baseline.counts.complete, 5);
+  assert.equal(baseline.counts.open, 10);
+  assert.equal(baseline.counts.overdue, 6);
+  const completed = await client.request('/api/tasks/T006/complete', { method: 'POST', body: {} });
+  assert.equal(completed.response.status, 200);
+  const after = (await client.request('/api/tasks?date=2026-10-15')).data;
+  assert.equal(after.counts.complete, 6);
+  assert.equal(after.counts.open, 9);
+  assert.equal(after.counts.overdue, 5);
+  assert.equal(after.tasks.find((task) => task.id === 'T006').status, 'complete');
+  await client.request('/api/tasks/T007/cancel', { method: 'POST', body: {} });
+  const afterCancel = (await client.request('/api/tasks?date=2026-10-15')).data;
+  assert.equal(afterCancel.counts.overdue, 4);
+  assert.equal(afterCancel.tasks.find((task) => task.id === 'T007').status, 'cancelled');
+  assert.ok((await client.request('/api/audit')).data.some((entry) => entry.record_type === 'task' && entry.record_id === 'T006' && entry.action === 'complete'));
+}));
+
+test('follow-up jobs are deduplicated and seeded practice records do not create welcome or thank-you jobs', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  await client.request('/api/tasks/ensure-followups', { method: 'POST', body: { date: '2026-10-15' } });
+  await client.request('/api/tasks/ensure-followups', { method: 'POST', body: { date: '2026-10-15' } });
+  let tasks = (await client.request('/api/tasks?date=2026-10-15')).data.tasks;
+  assert.equal(tasks.filter((task) => task.type === 'manual').length, 15);
+  assert.equal(tasks.filter((task) => task.type === 'Renewal').length, 6);
+  assert.equal(tasks.filter((task) => ['Welcome', 'Thank-you'].includes(task.type)).length, 0);
+  const membership = await client.request('/api/memberships', { method: 'POST', body: { contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'WELCOME-ONLY-ONCE', payment_date: '2026-10-15', method: 'fake cash', payment_status: 'paid' } });
+  assert.equal(membership.response.status, 201);
+  tasks = (await client.request('/api/tasks?date=2026-10-15')).data.tasks;
+  const welcome = tasks.filter((task) => task.source_key === `membership:${membership.data.id}:welcome`);
+  assert.equal(welcome.length, 1);
+  assert.equal(welcome[0].due_date, '2026-10-15');
+  assert.equal(welcome[0].owner, 'staff-demo');
+  const another = await client.request('/api/memberships', { method: 'POST', body: { id: membership.data.id, contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'WELCOME-DUPE', payment_date: '2026-10-15', method: 'fake cash', payment_status: 'paid' } });
+  assert.equal(another.response.status, 409);
+  assert.equal((await client.request('/api/tasks?date=2026-10-15')).data.tasks.filter((task) => task.source_key === welcome[0].source_key).length, 1);
+}));
+
+test('viewers cannot change donations, tasks, or backup data; admin restore creates a separate SQLite copy', async () => {
+  const restoreDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-restore-test-'));
+  const previousDir = process.env.CRM_RESTORE_DIR;
+  process.env.CRM_RESTORE_DIR = restoreDir;
+  try {
+    await withClient(async (staff) => {
+      await staff.request('/api/import/practice-data', { method: 'POST', body: {} });
+      const viewer = await staff.loginAs('viewer-demo', 'ViewerDemo2026!');
+      const admin = await staff.loginAs('admin-demo', 'AdminDemo2026!');
+      const bodyRequest = async (cookie, route, body = {}) => fetch(`${staff.baseUrl}${route}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal((await fetch(`${staff.baseUrl}/api/admin/backup`, { headers: { cookie: staff.cookie } })).status, 403);
+      assert.equal((await bodyRequest(viewer.cookie, '/api/admin/restore', { format: 'nope' })).status, 403);
+      const before = staff.db.prepare('SELECT COUNT(*) AS count FROM donations').get().count;
+      const beforeAudit = staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count;
+      assert.equal((await bodyRequest(viewer.cookie, '/api/donations/D001/void')).status, 403);
+      assert.equal((await bodyRequest(viewer.cookie, '/api/tasks/T006/complete')).status, 403);
+      assert.equal((await bodyRequest(viewer.cookie, '/api/tasks', { contact_id: 'C101', type: 'manual', title: 'blocked', owner: 'viewer', due_date: '2026-10-15' })).status, 403);
+      assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM donations').get().count, before);
+      assert.equal(staff.db.prepare("SELECT status FROM tasks WHERE id = 'T006'").get().status, 'open');
+      assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count, beforeAudit);
+      const backupResponse = await fetch(`${staff.baseUrl}/api/admin/backup`, { headers: { cookie: admin.cookie } });
+      assert.equal(backupResponse.status, 200);
+      const backup = await backupResponse.json();
+      assert.equal(backup.tables.donations.length, 20);
+      assert.equal(backup.tables.tasks.length, 21);
+      assert.equal(backup.tables.tasks.filter((task) => task.type === 'manual').length, 15);
+      const originalAuditCount = staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count;
+      const restoredResponse = await bodyRequest(admin.cookie, '/api/admin/restore', backup);
+      assert.equal(restoredResponse.status, 201);
+      const restored = await restoredResponse.json();
+      assert.ok(fs.existsSync(restored.file));
+      const restoredDb = new Database(restored.file);
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS count FROM contacts').get().count, 30);
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS count FROM memberships').get().count, 20);
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS count FROM donations').get().count, 20);
+      assert.equal(restoredDb.prepare('SELECT COUNT(*) AS count FROM tasks').get().count, 21);
+      assert.equal(restoredDb.prepare("SELECT contact_id FROM donations WHERE id='D002'").get().contact_id, 'C101');
+      assert.deepEqual(restoredDb.prepare("SELECT amount, date, campaign FROM donations WHERE id='D002'").get(), { amount: 25, date: '2026-10-02', campaign: 'Campaign A' });
+      assert.equal(restoredDb.prepare("SELECT status FROM tasks WHERE id='T006'").get().status, 'open');
+      assert.equal(restoredDb.prepare("SELECT action FROM audit_events WHERE record_type='backup'").get().action, 'restore to separate copy');
+      restoredDb.close();
+      assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM audit_events').get().count, originalAuditCount);
+      assert.equal(staff.db.prepare('SELECT COUNT(*) AS count FROM donations').get().count, 20);
+    });
+  } finally {
+    if (previousDir === undefined) delete process.env.CRM_RESTORE_DIR; else process.env.CRM_RESTORE_DIR = previousDir;
+    fs.rmSync(restoreDir, { recursive: true, force: true });
+  }
+});
+
 test('previous eight-menu structure remains and the unfinished CRM screens are still labeled honestly', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const links = [...html.matchAll(/<a class="nav-link" href="#([^"]+)" data-screen="([^"]+)">/g)];
   assert.equal(links.length, 8);
   for (const [, hash, screen] of links) assert.equal(hash, screen);
-  for (const screen of ['donations', 'tasks', 'reports']) {
+  for (const screen of ['reports']) {
     const section = html.match(new RegExp(`<section class="screen placeholder-screen" id="screen-${screen}"[\\s\\S]*?<\\/section>`))?.[0] || '';
     assert.match(section, /Not built yet/);
   }
   assert.match(html, /id="add-membership" type="button" hidden/);
   assert.match(html, /id="membership-plan-editor" hidden/);
+  assert.match(html, /id="donation-form"/);
+  assert.match(html, /id="task-form"/);
+  assert.match(html, /id="backup-tools" hidden/);
   assert.match(app, /function roleCanWrite\(\) \{ return currentUser && \['admin', 'staff'\]\.includes\(currentUser\.role\); \}/);
   assert.match(app, /user\.role !== 'admin'/);
   assert.match(app, /roleCanWrite\(\) \? `<button class="secondary-button renew-membership"/);

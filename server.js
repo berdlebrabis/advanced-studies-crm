@@ -82,11 +82,13 @@ function initializeSchema(db) {
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL,
       campaign TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', payment_code TEXT,
       thank_you_sent INTEGER NOT NULL DEFAULT 0, voided INTEGER NOT NULL DEFAULT 0,
+      voided_by TEXT, voided_at TEXT,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL,
       owner TEXT NOT NULL DEFAULT '', due_date TEXT, status TEXT NOT NULL,
+      source_key TEXT UNIQUE,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
     CREATE TABLE IF NOT EXISTS app_users (
@@ -113,7 +115,12 @@ function initializeSchema(db) {
     );
   `);
   ensureColumn(db, 'contacts', 'archived', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'donations', 'voided_by', 'TEXT');
+  ensureColumn(db, 'donations', 'voided_at', 'TEXT');
+  ensureColumn(db, 'tasks', 'source_key', 'TEXT');
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique_ci ON contacts(lower(trim(email))) WHERE trim(email) <> ''");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS donations_payment_code_unique ON donations(payment_code) WHERE payment_code IS NOT NULL AND trim(payment_code) <> ''");
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS tasks_source_key_unique ON tasks(source_key) WHERE source_key IS NOT NULL');
   db.exec('CREATE INDEX IF NOT EXISTS contacts_household_idx ON contacts(household_id)');
   db.exec('CREATE INDEX IF NOT EXISTS audit_record_idx ON audit_events(record_type, record_id, id DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS membership_period_dates_idx ON membership_periods(membership_id, start_date, end_date)');
@@ -218,6 +225,25 @@ function addMembershipYear(date) {
 
 function daysBetween(start, end) {
   return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000);
+}
+
+function addDays(date, days) {
+  if (!validIsoDate(date)) throw new Error('Enter a real date in YYYY-MM-DD format.');
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function newTaskId(db) {
+  return `AUTO-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+}
+
+function addFollowupTask(db, { contactId, type, title, owner, dueDate, sourceKey }) {
+  const id = newTaskId(db);
+  const result = db.prepare(`INSERT OR IGNORE INTO tasks (id, contact_id, type, title, owner, due_date, status, source_key)
+    VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`)
+    .run(id, contactId, type, title, owner, dueDate, sourceKey);
+  return result.changes ? id : null;
 }
 
 function membershipState(db, membershipId, asOf) {
@@ -330,6 +356,192 @@ function createApp(db) {
       donationTotal: donation.total, renewalsDue: renewalDue, overdueTasks });
   });
 
+  function donationSummary({ campaign, from, to }) {
+    const where = ['voided = 0']; const values = [];
+    if (campaign) { where.push('campaign = ?'); values.push(campaign); }
+    if (from) { where.push('date >= ?'); values.push(from); }
+    if (to) { where.push('date <= ?'); values.push(to); }
+    return db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total FROM donations WHERE ${where.join(' AND ')}`).get(...values);
+  }
+
+  app.get('/api/donations', requireAuth, (req, res) => {
+    const campaign = String(req.query.campaign || '').trim();
+    const from = String(req.query.from || '').trim(); const to = String(req.query.to || '').trim();
+    if ((from && !validIsoDate(from)) || (to && !validIsoDate(to))) return res.status(400).json({ error: 'Choose real dates for the date range.' });
+    if (from && to && from > to) return res.status(400).json({ error: 'The start date must be on or before the end date.' });
+    const where = []; const values = [];
+    if (campaign) { where.push('d.campaign = ?'); values.push(campaign); }
+    if (from) { where.push('d.date >= ?'); values.push(from); }
+    if (to) { where.push('d.date <= ?'); values.push(to); }
+    const list = db.prepare(`SELECT d.*, c.name AS donor_name, d.voided_by, d.voided_at FROM donations d JOIN contacts c ON c.id = d.contact_id
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY d.date DESC, d.id`).all(...values).map((item) => ({
+      ...item, history: db.prepare("SELECT actor_name, action, occurred_at FROM audit_events WHERE record_type = 'donation' AND record_id = ? ORDER BY id DESC").all(item.id)
+    }));
+    const campaigns = db.prepare('SELECT DISTINCT campaign FROM donations ORDER BY campaign COLLATE NOCASE').all().map((item) => item.campaign);
+    res.json({ donations: list, summary: donationSummary({ campaign, from, to }), campaigns });
+  });
+
+  app.post('/api/donations', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const contactId = String(req.body.contact_id || '').trim();
+    const contact = db.prepare('SELECT id FROM contacts WHERE id = ? AND archived = 0').get(contactId);
+    if (!contact) return res.status(400).json({ error: 'Choose a saved, active donor contact.' });
+    const amount = Number(req.body.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) !== amount * 100) return res.status(400).json({ error: 'Enter an amount greater than $0 with no more than two decimal places.' });
+    const date = String(req.body.date || '').trim();
+    if (!validIsoDate(date)) return res.status(400).json({ error: 'Enter a real donation date in YYYY-MM-DD format.' });
+    const campaign = String(req.body.campaign || '').trim();
+    const method = String(req.body.method || '').trim();
+    const paymentCode = String(req.body.payment_code || '').trim();
+    if (!campaign) return res.status(400).json({ error: 'Enter a campaign for this donation.' });
+    if (!method) return res.status(400).json({ error: 'Enter how the donation was paid.' });
+    if (!paymentCode) return res.status(400).json({ error: 'Enter a payment code.' });
+    if (db.prepare('SELECT 1 FROM donations WHERE payment_code = ?').get(paymentCode)) return res.status(409).json({ error: 'That payment code has already been used.' });
+    const thankYouSent = ['true', 'yes', '1', 'on'].includes(String(req.body.thank_you_sent || '').trim().toLowerCase());
+    const id = String(req.body.id || '').trim() || `D-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+    if (db.prepare('SELECT 1 FROM donations WHERE id = ?').get(id)) return res.status(409).json({ error: 'A donation with that ID already exists.' });
+    try {
+      db.transaction(() => {
+        db.prepare(`INSERT INTO donations (id, contact_id, amount, date, campaign, method, payment_code, thank_you_sent)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, contactId, amount, date, campaign, method, paymentCode, thankYouSent ? 1 : 0);
+        audit(req.user, 'add', 'donation', id);
+        if (!thankYouSent) {
+          const taskId = addFollowupTask(db, { contactId, type: 'Thank-you', title: 'Thank-you for donation', owner: req.user.username,
+            dueDate: addDays(date, 7), sourceKey: `donation:${id}:thank-you` });
+          if (taskId) audit(req.user, 'create thank-you follow-up', 'task', taskId);
+        }
+      })();
+    } catch (error) {
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That payment code or donation ID is already in use.' });
+      console.error(error); return res.status(500).json({ error: 'Donation save failed. No donation or follow-up was kept.' });
+    }
+    res.status(201).json({ id, message: `Donation ${id} saved.` });
+  });
+
+  app.post('/api/donations/:id/void', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const donation = db.prepare('SELECT id, voided FROM donations WHERE id = ?').get(req.params.id);
+    if (!donation) return res.status(404).json({ error: 'Donation not found.' });
+    if (donation.voided) return res.status(409).json({ error: 'This donation is already void.' });
+    db.transaction(() => {
+      db.prepare("UPDATE donations SET voided = 1, voided_by = ?, voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?")
+        .run(req.user.username, donation.id);
+      audit(req.user, 'void', 'donation', donation.id);
+      const tasks = db.prepare("SELECT id FROM tasks WHERE source_key = ? AND status = 'open'").all(`donation:${donation.id}:thank-you`);
+      db.prepare("UPDATE tasks SET status = 'cancelled' WHERE source_key = ? AND status = 'open'").run(`donation:${donation.id}:thank-you`);
+      for (const task of tasks) audit(req.user, 'cancel', 'task', task.id);
+    })();
+    res.json({ id: donation.id, voided: true, message: `Donation ${donation.id} was voided; its amount is excluded from totals.` });
+  });
+
+  function ensureRenewalTasks(asOf, actor) {
+    const members = db.prepare('SELECT id, contact_id FROM memberships').all();
+    for (const member of members) {
+      const state = membershipState(db, member.id, asOf);
+      if (!state.expiring) continue;
+      const endDate = db.prepare(`SELECT MAX(end_date) AS end_date FROM membership_periods WHERE membership_id = ? AND start_date <= ? AND end_date > ?`)
+        .get(member.id, asOf, asOf)?.end_date;
+      if (endDate) {
+        const taskId = addFollowupTask(db, { contactId: member.contact_id, type: 'Renewal', title: 'Membership renewal follow-up', owner: actor.username,
+          dueDate: endDate, sourceKey: `membership:${member.id}:renewal:${endDate}` });
+        if (taskId) audit(actor, 'create renewal follow-up', 'task', taskId);
+      }
+    }
+  }
+
+  app.post('/api/tasks/ensure-followups', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const asOf = String(req.body.date || readReferenceData().test_date);
+    if (!validIsoDate(asOf)) return res.status(400).json({ error: 'Choose a real date in YYYY-MM-DD format.' });
+    ensureRenewalTasks(asOf, req.user);
+    res.json({ ok: true });
+  });
+
+  app.get('/api/tasks', requireAuth, (req, res) => {
+    const asOf = String(req.query.date || readReferenceData().test_date);
+    if (!validIsoDate(asOf)) return res.status(400).json({ error: 'Choose a real date in YYYY-MM-DD format.' });
+    const tasks = db.prepare(`SELECT t.*, c.name AS contact_name FROM tasks t JOIN contacts c ON c.id = t.contact_id
+      ORDER BY CASE t.status WHEN 'open' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END, t.due_date, t.id`).all().map((item) => ({
+      ...item, history: db.prepare("SELECT actor_name, action, occurred_at FROM audit_events WHERE record_type = 'task' AND record_id = ? ORDER BY id DESC").all(item.id)
+    }));
+    const counts = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
+      SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) AS complete,
+      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN status = 'open' AND due_date < ? THEN 1 ELSE 0 END) AS overdue FROM tasks WHERE type = 'manual'`).get(asOf);
+    const allCounts = db.prepare(`SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open,
+      SUM(CASE WHEN status = 'complete' THEN 1 ELSE 0 END) AS complete,
+      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN status = 'open' AND due_date < ? THEN 1 ELSE 0 END) AS overdue FROM tasks`).get(asOf);
+    res.json({ asOf, tasks, counts: Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, value || 0])),
+      allCounts: Object.fromEntries(Object.entries(allCounts).map(([key, value]) => [key, value || 0])) });
+  });
+
+  app.post('/api/tasks', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const contactId = String(req.body.contact_id || '').trim();
+    if (!db.prepare('SELECT 1 FROM contacts WHERE id = ?').get(contactId)) return res.status(400).json({ error: 'Choose a saved contact.' });
+    const type = String(req.body.type || 'manual').trim(); const title = String(req.body.title || '').trim();
+    const owner = String(req.body.owner || req.user.username).trim(); const dueDate = String(req.body.due_date || '').trim();
+    if (!type || !title || !owner) return res.status(400).json({ error: 'Enter a task type, task name, and owner.' });
+    if (!validIsoDate(dueDate)) return res.status(400).json({ error: 'Enter a real due date in YYYY-MM-DD format.' });
+    const id = String(req.body.id || '').trim() || `T-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+    if (db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(id)) return res.status(409).json({ error: 'A task with that ID already exists.' });
+    try {
+      db.transaction(() => { db.prepare("INSERT INTO tasks (id, contact_id, type, title, owner, due_date, status) VALUES (?, ?, ?, ?, ?, ?, 'open')")
+        .run(id, contactId, type, title, owner, dueDate); audit(req.user, 'add', 'task', id); })();
+    } catch (error) { console.error(error); return res.status(500).json({ error: 'The task was not saved.' }); }
+    res.status(201).json({ id, message: `Task ${id} saved.` });
+  });
+
+  app.post('/api/tasks/:id/:action', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const status = req.params.action === 'complete' ? 'complete' : req.params.action === 'cancel' ? 'cancelled' : '';
+    if (!status) return res.status(404).json({ error: 'Choose Complete or Cancel.' });
+    const task = db.prepare('SELECT id, status FROM tasks WHERE id = ?').get(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found.' });
+    if (task.status !== 'open') return res.status(409).json({ error: 'Only an open task can be changed.' });
+    db.transaction(() => { db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(status, task.id); audit(req.user, status, 'task', task.id); })();
+    res.json({ id: task.id, status, message: `Task ${task.id} marked ${status}.` });
+  });
+
+  app.get('/api/admin/backup', requireAuth, allowRoles('admin'), (_req, res) => {
+    const tables = ['households', 'contacts', 'memberships', 'membership_plans', 'membership_payments', 'membership_periods', 'donations', 'tasks', 'audit_events'];
+    const backup = { format: 'advanced-studies-crm-backup-v1', created_at: new Date().toISOString(), tables: {} };
+    for (const table of tables) backup.tables[table] = db.prepare(`SELECT * FROM ${table}`).all();
+    res.type('application/json').attachment(`crm-backup-${new Date().toISOString().slice(0, 10)}.json`).send(JSON.stringify(backup, null, 2));
+  });
+
+  app.post('/api/admin/restore', requireAuth, allowRoles('admin'), (req, res) => {
+    const backup = req.body;
+    const required = ['households', 'contacts', 'memberships', 'membership_plans', 'membership_payments', 'membership_periods', 'donations', 'tasks', 'audit_events'];
+    if (!backup || backup.format !== 'advanced-studies-crm-backup-v1' || !backup.tables || required.some((key) => !Array.isArray(backup.tables[key]))) {
+      return res.status(400).json({ error: 'Choose a valid CRM backup made by this app.' });
+    }
+    const restoreDir = process.env.CRM_RESTORE_DIR || path.join(root, 'data', 'restores');
+    fs.mkdirSync(restoreDir, { recursive: true });
+    const restoreFile = path.join(restoreDir, `crm-restore-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.sqlite`);
+    const restored = new Database(restoreFile);
+    try {
+      initializeSchema(restored);
+      const safeRows = Object.fromEntries(required.map((table) => [table, backup.tables[table]]));
+      restored.transaction(() => {
+        for (const table of [...required].reverse()) restored.prepare(`DELETE FROM ${table}`).run();
+        for (const table of required) {
+          const rows = safeRows[table]; if (!rows.length) continue;
+          const columns = restored.prepare(`PRAGMA table_info(${table})`).all().map((item) => item.name);
+          for (const row of rows) {
+            if (!row || typeof row !== 'object' || Object.keys(row).some((key) => !columns.includes(key))) throw new Error(`Backup has an invalid ${table} record.`);
+            const keys = Object.keys(row); if (!keys.length) throw new Error(`Backup has an empty ${table} record.`);
+            const placeholders = keys.map(() => '?').join(',');
+            restored.prepare(`INSERT INTO ${table} (${keys.join(',')}) VALUES (${placeholders})`).run(...keys.map((key) => row[key]));
+          }
+        }
+      })();
+      restored.prepare('INSERT INTO audit_events (actor_name, action, record_type, record_id) VALUES (?, ?, ?, ?)')
+        .run(req.user.username, 'restore to separate copy', 'backup', path.basename(restoreFile));
+      res.status(201).json({ message: 'Backup restored into a separate database copy. The current database was left unchanged.', file: restoreFile });
+    } catch (error) {
+      restored.close(); fs.rmSync(restoreFile, { force: true });
+      console.error(error); return res.status(400).json({ error: 'Restore failed. The current database was left unchanged.' });
+    }
+    restored.close();
+  });
+
   app.get('/api/membership-plans', requireAuth, (_req, res) => {
     res.json(db.prepare('SELECT id, name, price, updated_at FROM membership_plans ORDER BY CASE id WHEN \'individual\' THEN 1 WHEN \'family\' THEN 2 ELSE 3 END').all());
   });
@@ -421,6 +633,11 @@ function createApp(db) {
       db.prepare(`INSERT INTO memberships (id, contact_id, household_id, plan, price, payment_status, payment_code)
         VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, membership.contactId, membership.householdId, membership.plan.id, membership.amount, membership.status, membership.paymentCode);
       insertPayment(id, membership, membership.status === 'paid' ? membership.paymentDate : null);
+      if (membership.status === 'paid') {
+        const taskId = addFollowupTask(db, { contactId: membership.contactId, type: 'Welcome', title: 'Welcome new member', owner: req.user.username,
+          dueDate: membership.paymentDate, sourceKey: `membership:${id}:welcome` });
+        if (taskId) audit(req.user, 'create welcome follow-up', 'task', taskId);
+      }
       audit(req.user, 'add', 'membership', id);
     });
     try { tx(); } catch (error) {
@@ -625,12 +842,27 @@ function createApp(db) {
         }
         audit(_req.user, 'import', 'membership', membership.id);
       }
+      for (const donation of data.donations || []) {
+        const result = db.prepare(`INSERT OR IGNORE INTO donations (id, contact_id, amount, date, campaign, method, payment_code, thank_you_sent, voided)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(donation.id, donation.contact_id, donation.amount, donation.date,
+          donation.campaign || '', donation.method || '', donation.payment_code || null, donation.thank_you_sent ? 1 : 0, donation.voided ? 1 : 0);
+        if (result.changes) audit(_req.user, 'import', 'donation', donation.id);
+      }
+      for (const task of data.tasks || []) {
+        const result = db.prepare(`INSERT OR IGNORE INTO tasks (id, contact_id, type, title, owner, due_date, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(task.id, task.contact_id, task.type || 'manual', task.title || task.type || 'Follow-up',
+          task.owner || '', task.due_date || null, task.status || 'open');
+        if (result.changes) audit(_req.user, 'import', 'task', task.id);
+      }
     });
     try { tx(); } catch (error) { return res.status(400).json({ error: `Practice-data import was rolled back: ${error.message}` }); }
+    ensureRenewalTasks(data.test_date || readReferenceData().test_date, _req.user);
     const importedMembershipCount = (data.memberships || []).filter((membership) => db.prepare('SELECT 1 FROM membership_payments WHERE membership_id = ?').get(membership.id)).length;
+    const importedDonationCount = (data.donations || []).filter((donation) => db.prepare('SELECT 1 FROM donations WHERE id = ?').get(donation.id)).length;
+    const importedTaskCount = (data.tasks || []).filter((task) => db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(task.id)).length;
     res.json({ inserted: inserted.length, skipped: skipped.length, active: db.prepare('SELECT COUNT(*) count FROM contacts WHERE archived = 0').get().count,
-      memberships: importedMembershipCount,
-      message: `Added ${inserted.length} practice contacts and loaded ${importedMembershipCount} practice memberships; kept existing contact records unchanged.` });
+      memberships: importedMembershipCount, donations: importedDonationCount, tasks: importedTaskCount,
+      message: `Added ${inserted.length} practice contacts, loaded ${importedMembershipCount} memberships, ${importedDonationCount} donations, and ${importedTaskCount} tasks; kept existing contact records unchanged.` });
   });
 
   app.post('/api/import/contacts-csv', requireAuth, allowRoles('admin', 'staff'), (req, res) => {

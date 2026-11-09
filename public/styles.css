@@ -157,6 +157,16 @@ td { height: 53px; padding: 8px 12px; border-top: 1px solid #eef1ed; color: #6f7
 .membership-history summary { color: var(--green); cursor: pointer; font-size: 10px; }
 .membership-history ul { display: grid; gap: 4px; padding-left: 16px; margin: 6px 0; color: #728074; font-size: 10px; }
 .membership-history p { margin: 5px 0; color: #69766b; font-size: 10px; }
+.donation-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 11px; padding: 14px 17px; margin-bottom: 12px; }
+.donation-toolbar label { display: grid; gap: 5px; color: #58675a; font-size: 11px; font-weight: 650; }
+.donation-toolbar input, .donation-toolbar select { min-height: 36px; padding: 6px 9px; border: 1px solid #e0e6df; border-radius: 7px; background: #fff; color: #303b32; }
+.donation-toolbar > strong { margin-left: auto; color: #344137; font-size: 13px; }
+.voided-row { background: #faf8f5; opacity: .72; }
+.overdue-row { background: #fff9f4; }
+.void-donation { min-height: 29px; padding: 4px 8px; color: #8a443b; font-size: 10px; }
+.complete-task { min-height: 29px; padding: 4px 8px; font-size: 10px; }
+#task-summary { margin: 0; color: #617064; font-size: 12px; }
+#backup-tools > p { margin-bottom: 0; }
 .renew-membership { min-height: 30px; padding: 5px 8px; font-size: 10px; }
 .plan-price-grid { display: grid; grid-template-columns: repeat(3, minmax(190px, 1fr)); gap: 10px; padding: 0 18px 18px; }
 .plan-price-row { display: grid; grid-template-columns: 1fr auto; gap: 7px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
@@ -182,4 +192,4 @@ footer span { padding: 0 5px; color: #c1c6c0; }
 .form-message { min-height: 17px; margin: 8px 0 0; color: #a34737; font-size: 11px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 8px; }
 @media (max-width: 1100px) { .main { padding-right: 24px; padding-left: 24px; } .sidebar { width: 220px; } .main { margin-left: 220px; } .metrics { grid-template-columns: repeat(3, minmax(130px, 1fr)); } .membership-metrics { grid-template-columns: repeat(2, minmax(150px, 1fr)); } }
-@media (max-width: 760px) { .sidebar { position: static; width: auto; padding: 13px 15px; border-right: 0; border-bottom: 1px solid var(--line); } .brand { margin: 0; } .nav-label { display: none; } .sidebar-bottom { display: block; margin-top: 8px; } .sidebar nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; margin-top: 12px; } .nav-link { min-height: 36px; justify-content: center; gap: 5px; padding: 3px; font-size: 10px; text-align: center; } .nav-icon { display: none; } .main { margin: 0; padding: 0 15px 18px; } .topbar { height: 53px; } .screen { padding-top: 22px; } .welcome, .page-heading { align-items: flex-start; flex-direction: column; } .metrics, .membership-metrics, .plan-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; } .metric-card { min-height: 112px; padding: 12px; } .table-toolbar { padding: 12px 12px 4px; flex-wrap: wrap; } .import-tools { flex-wrap: wrap; padding: 10px 12px; } th:first-child, td:first-child { padding-left: 12px; } th:last-child, td:last-child { padding-right: 12px; } .detail-grid { grid-template-columns: 1fr; } footer .footer-right { display: none; } }
+@media (max-width: 760px) { .sidebar { position: static; width: auto; padding: 13px 15px; border-right: 0; border-bottom: 1px solid var(--line); } .brand { margin: 0; } .nav-label { display: none; } .sidebar-bottom { display: block; margin-top: 8px; } .sidebar nav { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; margin-top: 12px; } .nav-link { min-height: 36px; justify-content: center; gap: 5px; padding: 3px; font-size: 10px; text-align: center; } .nav-icon { display: none; } .main { margin: 0; padding: 0 15px 18px; } .topbar { height: 53px; } .screen { padding-top: 22px; } .welcome, .page-heading { align-items: flex-start; flex-direction: column; } .metrics, .membership-metrics, .plan-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; } .metric-card { min-height: 112px; padding: 12px; } .table-toolbar { padding: 12px 12px 4px; flex-wrap: wrap; } .import-tools { flex-wrap: wrap; padding: 10px 12px; } .donation-toolbar > strong { margin-left: 0; width: 100%; } th:first-child, td:first-child { padding-left: 12px; } th:last-child, td:last-child { padding-right: 12px; } .detail-grid { grid-template-columns: 1fr; } footer .footer-right { display: none; } }
