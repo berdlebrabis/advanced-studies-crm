@@ -25,19 +25,27 @@ function addFixtureContacts() {
   tx();
 }
 
+let cookie;
+async function signIn() {
+ const r=await fetch(`${await baseUrl}/api/sign-in`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'staff-demo',password:'demo-staff'})});
+ assert.equal(r.status,200);
+ cookie=r.headers.get('set-cookie').split(';')[0];
+}
 async function postContact(body) {
+ if(!cookie) await signIn();
   return fetch(`${await baseUrl}/api/contacts`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    method: 'POST', headers: { 'content-type': 'application/json',cookie }, body: JSON.stringify(body)
   });
 }
 
  test('search is case-insensitive and no matches return an empty list', async () => {
+  await signIn();
   addFixtureContacts();
   for (const search of ['Alex', 'ALEX']) {
-    const result = await fetch(`${await baseUrl}/api/contacts?search=${search}`).then((r) => r.json());
+    const result = await fetch(`${await baseUrl}/api/contacts?search=${search}`,{headers:{cookie}}).then((r) => r.json());
     assert.equal(result[0]?.id, 'C101');
   }
-  const none = await fetch(`${await baseUrl}/api/contacts?search=Nobody`).then((r) => r.json());
+  const none = await fetch(`${await baseUrl}/api/contacts?search=Nobody`,{headers:{cookie}}).then((r) => r.json());
   assert.deepEqual(none, []);
 });
 
@@ -90,7 +98,7 @@ test('the eight menu destinations match titled screens and unfinished screens st
     assert.ok(html.includes(`id="screen-${screen}" data-title="${screenTitles[screen]}"`));
   }
   assert.match(appJs, /link\.addEventListener\('click',\s*\(\)\s*=>\s*setScreen\(link\.dataset\.screen\)\)/);
-  for (const screen of ['memberships', 'donations', 'tasks', 'reports', 'settings']) {
+  for (const screen of ['memberships', 'donations', 'tasks', 'reports']) {
     const section = html.match(new RegExp(`<section class="screen placeholder-screen" id="screen-${screen}"[\\s\\S]*?<\\/section>`))?.[0] ?? '';
     assert.match(section, /Not built yet/);
   }
@@ -108,4 +116,25 @@ test('every contact form control has a visible label and keyboard focus styling'
   assert.match(html, /<button[^>]*id="cancel-contact"[^>]*>Cancel<\/button>/);
   assert.match(html, /<button[^>]*type="submit"[^>]*>Save<\/button>/);
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*3px solid/);
+});
+
+test('viewer cannot write and editing preserves the ID and other records', async () => {
+ const login=await fetch(`${await baseUrl}/api/sign-in`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'viewer-demo',password:'demo-viewer'})});
+ const viewerCookie=login.headers.get('set-cookie').split(';')[0];
+ const forbidden=await fetch(`${await baseUrl}/api/contacts/C101`,{method:'PUT',headers:{'content-type':'application/json',cookie:viewerCookie},body:JSON.stringify({name:'Changed'})});
+ assert.equal(forbidden.status,403);
+ const edited=await fetch(`${await baseUrl}/api/contacts/C101`,{method:'PUT',headers:{'content-type':'application/json',cookie},body:JSON.stringify({name:'  Alex Updated  ',phone:'555-9999',email_opt_in:false})});
+ assert.equal(edited.status,200);
+ assert.equal(db.prepare('SELECT name FROM contacts WHERE id=?').get('C101').name,'Alex Updated');
+ assert.equal(db.prepare('SELECT name FROM contacts WHERE id=?').get('C102').name,readReferenceData().contacts[1].name);
+});
+test('archive hides a contact but keeps its stored details and records audit actor',async()=>{
+ const r=await fetch(`${await baseUrl}/api/contacts/C101/archive`,{method:'POST',headers:{cookie}});
+ assert.equal(r.status,200);
+ assert.equal(db.prepare('SELECT archived FROM contacts WHERE id=?').get('C101').archived,1);
+ assert.equal(db.prepare('SELECT actor FROM audit_log ORDER BY id DESC LIMIT 1').get().actor,'staff-demo');
+});
+test('invalid and duplicate emails cannot be saved',async()=>{
+ assert.equal((await postContact({id:'C950',name:'Invalid',email:'bad-email'})).status,400);
+ assert.equal((await postContact({id:'C951',name:'Duplicate',email:'PERSON101@EXAMPLE.COM'})).status,409);
 });
