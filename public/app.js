@@ -9,6 +9,9 @@ let householdOptions = [];
 let allTags = [];
 let currentUser = null;
 let editingId = null;
+let membershipPlans = [];
+let memberships = [];
+let practiceDate = '2026-10-15';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -41,6 +44,7 @@ function setScreen(screenName) {
   document.querySelector('#current-page').textContent = section.dataset.title;
   document.title = `${section.dataset.title} · Advanced Studies CRM`;
   if (location.hash !== `#${nextScreen}`) history.replaceState(null, '', `#${nextScreen}`);
+  if (nextScreen === 'memberships' && currentUser) loadMembershipData().catch(showMembershipError);
 }
 
 function roleCanWrite() { return currentUser && ['admin', 'staff'].includes(currentUser.role); }
@@ -60,6 +64,8 @@ function setSignedIn(user) {
   document.querySelector('#contact-import-tools').hidden = !roleCanWrite();
   document.querySelector('#export-contacts').hidden = user.role !== 'admin';
   document.querySelector('#user-management').hidden = user.role !== 'admin';
+  document.querySelector('#add-membership').hidden = !roleCanWrite();
+  document.querySelector('#membership-plan-editor').hidden = user.role !== 'admin';
   document.querySelector('#settings-summary').textContent = `Signed in as ${user.username} (${user.role}).`;
 }
 
@@ -123,13 +129,101 @@ async function loadTags() { allTags = await api('/api/contact-tags'); updateTagO
 
 async function loadOverview() {
   const data = await api('/api/overview');
+  practiceDate = data.testDate;
   document.querySelector('#test-date').textContent = `Practice data · ${dateFormat.format(new Date(`${data.testDate}T00:00:00`))}`;
+  const dateInput = document.querySelector('#membership-as-of');
+  if (!dateInput.dataset.initialized) { dateInput.value = data.testDate; dateInput.dataset.initialized = 'true'; }
   document.querySelector('#metric-contacts').textContent = data.activePeople;
   document.querySelector('#metric-members').textContent = data.activeMemberships;
   document.querySelector('#metric-giving').textContent = money.format(data.donationTotal);
   document.querySelector('#gift-count').textContent = `${data.donationCount} recorded gifts`;
   document.querySelector('#metric-renewals').textContent = data.renewalsDue;
   document.querySelector('#metric-tasks').textContent = data.overdueTasks;
+}
+
+function showMembershipError(error) {
+  const message = document.querySelector('#membership-message');
+  message.textContent = error.message;
+  message.hidden = false;
+}
+
+function membershipHistoryText(items) {
+  if (!items.length) return 'No membership changes yet.';
+  return items.map((item) => `${escapeHtml(item.action)} · ${escapeHtml(item.record_type)} ${escapeHtml(item.record_id)} · ${escapeHtml(item.actor_name)} · ${escapeHtml(dateFormat.format(new Date(item.occurred_at)))}`).join('<br>');
+}
+
+function renderMembershipSummary(summary) {
+  document.querySelector('#membership-active-count').textContent = summary.active;
+  document.querySelector('#membership-people-count').textContent = `people covered ${summary.peopleCovered}`;
+  document.querySelector('#membership-ending-count').textContent = summary.endingSoon;
+  document.querySelector('#membership-ended-count').textContent = summary.ended;
+  document.querySelector('#membership-pending-count').textContent = summary.pending;
+}
+
+function renderMemberships() {
+  const tbody = document.querySelector('#membership-rows');
+  if (!memberships.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">No membership records found.</td></tr>'; return; }
+  tbody.innerHTML = memberships.map((item) => {
+    const memberName = item.household_id ? `${item.household_name || item.household_id} · ${item.household_id}` : item.contact_name;
+    const paidThrough = item.periods.length ? item.periods.reduce((latest, period) => period.end_date > latest ? period.end_date : latest, item.periods[0].end_date) : '—';
+    const action = roleCanWrite() ? `<button class="secondary-button renew-membership" type="button" data-renew-membership="${escapeHtml(item.id)}">Renew</button>` : '';
+    const history = `<details class="membership-history"><summary>Payments & history (${item.payments.length})</summary><ul>${item.payments.map((payment) => `<li>${escapeHtml(payment.payment_status || payment.status)} · ${money.format(payment.amount)} · ${escapeHtml(payment.payment_code)} · ${escapeHtml(payment.payment_date || 'date not recorded')}${payment.method ? ` · ${escapeHtml(payment.method)}` : ''}</li>`).join('') || '<li>No payments saved.</li>'}</ul><p><strong>Paid periods</strong></p><ul>${item.periods.map((period) => `<li>${escapeHtml(period.start_date)} to ${escapeHtml(period.end_date)} · ${money.format(period.amount)} · ${escapeHtml(period.payment_code)}</li>`).join('') || '<li>No paid period.</li>'}</ul><p><strong>Change history</strong><br>${membershipHistoryText(item.history)}</p></details>`;
+    return `<tr><td>${escapeHtml(item.id)}</td><td><button type="button" class="text-link" data-open-contact="${escapeHtml(item.contact_id)}">${escapeHtml(memberName)}</button></td><td>${escapeHtml(membershipPlans.find((plan) => plan.id === item.plan)?.name || item.plan)}</td><td>${money.format(item.price)}</td><td><span class="membership-status status-${escapeHtml(item.status)}">${escapeHtml(item.status)}${item.status === 'active' && item.expiring ? ` · ${item.daysRemaining} days left` : ''}</span></td><td>${escapeHtml(paidThrough)}</td><td>${action}${history}</td></tr>`;
+  }).join('');
+}
+
+function renderPlanPrices() {
+  document.querySelector('#membership-plan-fields').innerHTML = membershipPlans.map((plan) => `<div class="plan-price-row"><label for="plan-price-${escapeHtml(plan.id)}">${escapeHtml(plan.name)} price</label><input id="plan-price-${escapeHtml(plan.id)}" type="number" min="0" step="0.01" value="${Number(plan.price).toFixed(2)}"><button type="button" class="secondary-button" data-save-plan="${escapeHtml(plan.id)}">Save price</button></div>`).join('');
+}
+
+async function loadMembershipData() {
+  const asOf = document.querySelector('#membership-as-of').value || practiceDate;
+  document.querySelector('#membership-message').textContent = '';
+  const [summary, list, plans] = await Promise.all([
+    api(`/api/memberships/summary?date=${encodeURIComponent(asOf)}`),
+    api(`/api/memberships?date=${encodeURIComponent(asOf)}`),
+    api('/api/membership-plans')
+  ]);
+  memberships = list;
+  membershipPlans = plans;
+  renderMembershipSummary(summary);
+  renderMemberships();
+  renderPlanPrices();
+  const contactSelect = document.querySelector('#membership-contact');
+  if (!contactSelect.options.length || contactSelect.options.length === 1) {
+    const people = await api('/api/contacts?archived=false');
+    contactSelect.innerHTML = '<option value="">Choose a person (or leave blank for a household)</option>' + people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)} · ${escapeHtml(person.id)}</option>`).join('');
+  }
+  const householdSelect = document.querySelector('#membership-household');
+  if (!householdSelect.options.length || householdSelect.options.length === 1) householdSelect.innerHTML = '<option value="">No household</option>' + householdOptions.map((household) => `<option value="${escapeHtml(household.id)}">${escapeHtml(household.name)} · ${escapeHtml(household.id)} (${household.people_count} people)</option>`).join('');
+}
+
+function openMembershipDialog() {
+  const form = document.querySelector('#membership-form');
+  form.reset();
+  document.querySelector('#membership-form-message').textContent = '';
+  document.querySelector('#membership-dialog-title').textContent = 'Add Membership';
+  const planSelect = document.querySelector('#membership-plan');
+  planSelect.innerHTML = membershipPlans.map((plan) => `<option value="${escapeHtml(plan.id)}">${escapeHtml(plan.name)} · ${money.format(plan.price)}</option>`).join('');
+  document.querySelector('#membership-amount').value = membershipPlans[0]?.price ?? '';
+  document.querySelector('#membership-payment-date').value = document.querySelector('#membership-as-of').value || practiceDate;
+  document.querySelector('#membership-household').value = '';
+  document.querySelector('#membership-contact').value = '';
+  document.querySelector('#membership-dialog').showModal();
+  planSelect.focus();
+}
+
+function openRenewDialog(membership) {
+  const form = document.querySelector('#renew-form');
+  form.reset();
+  document.querySelector('#renew-form-message').textContent = '';
+  document.querySelector('#renew-membership-id').value = membership.id;
+  document.querySelector('#renew-dialog-title').textContent = `Renew ${membership.id}`;
+  document.querySelector('#renew-price-note').textContent = `Saved renewal price: ${money.format(membership.price)}. Earlier paid years will remain in history.`;
+  document.querySelector('#renew-amount').value = Number(membership.price).toFixed(2);
+  document.querySelector('#renew-payment-date').value = document.querySelector('#membership-as-of').value || practiceDate;
+  document.querySelector('#renew-dialog').showModal();
+  document.querySelector('#renew-payment-code').focus();
 }
 
 function showHistory(history = []) {
@@ -260,6 +354,65 @@ document.querySelector('#contact-detail-card').addEventListener('click', (event)
   const contactButton = event.target.closest('[data-open-contact]');
   if (contactButton) openContact(contactButton.dataset.openContact).catch(showError);
 });
+document.querySelector('#membership-rows').addEventListener('click', (event) => {
+  const renewButton = event.target.closest('[data-renew-membership]');
+  const contactButton = event.target.closest('[data-open-contact]');
+  if (renewButton) {
+    const membership = memberships.find((item) => item.id === renewButton.dataset.renewMembership);
+    if (membership) openRenewDialog(membership);
+  } else if (contactButton) openContact(contactButton.dataset.openContact).catch(showMembershipError);
+});
+document.querySelector('#membership-as-of').addEventListener('change', () => loadMembershipData().catch(showMembershipError));
+document.querySelector('#add-membership').addEventListener('click', () => loadMembershipData().then(openMembershipDialog).catch(showMembershipError));
+document.querySelector('#membership-plan').addEventListener('change', (event) => {
+  const plan = membershipPlans.find((item) => item.id === event.target.value);
+  if (plan) document.querySelector('#membership-amount').value = Number(plan.price).toFixed(2);
+});
+document.querySelector('#close-membership-dialog').addEventListener('click', () => document.querySelector('#membership-dialog').close());
+document.querySelector('#cancel-membership').addEventListener('click', () => document.querySelector('#membership-dialog').close());
+document.querySelector('#membership-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = document.querySelector('#membership-form-message');
+  message.textContent = '';
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  try {
+    const result = await api('/api/memberships', { method: 'POST', body: JSON.stringify(data) });
+    document.querySelector('#membership-dialog').close();
+    event.currentTarget.reset();
+    document.querySelector('#membership-message').textContent = result.status === 'paid'
+      ? `${result.id} saved with coverage through ${result.end_date}.`
+      : `${result.id} saved as ${result.status}; no membership time was added.`;
+    await Promise.all([loadMembershipData(), loadOverview()]);
+  } catch (error) { message.textContent = error.message; }
+});
+document.querySelector('#close-renew-dialog').addEventListener('click', () => document.querySelector('#renew-dialog').close());
+document.querySelector('#cancel-renew').addEventListener('click', () => document.querySelector('#renew-dialog').close());
+document.querySelector('#renew-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const message = document.querySelector('#renew-form-message');
+  message.textContent = '';
+  const data = Object.fromEntries(new FormData(event.currentTarget));
+  try {
+    const result = await api(`/api/memberships/${encodeURIComponent(data.id)}/renew`, { method: 'POST', body: JSON.stringify(data) });
+    document.querySelector('#renew-dialog').close();
+    event.currentTarget.reset();
+    document.querySelector('#membership-message').textContent = result.payment_status === 'paid'
+      ? `${result.id} renewed from ${result.start_date} through ${result.end_date}.`
+      : `${result.id} payment recorded as ${result.payment_status}; no time was added.`;
+    await Promise.all([loadMembershipData(), loadOverview()]);
+  } catch (error) { message.textContent = error.message; }
+});
+document.querySelector('#membership-plan-fields').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-save-plan]');
+  if (!button) return;
+  const planId = button.dataset.savePlan;
+  const price = Number(document.querySelector(`#plan-price-${CSS.escape(planId)}`).value);
+  try {
+    const plan = await api(`/api/admin/membership-plans/${encodeURIComponent(planId)}`, { method: 'PATCH', body: JSON.stringify({ price }) });
+    document.querySelector('#membership-message').textContent = `${plan.name} now costs ${money.format(plan.price)} for new memberships. Existing memberships keep their saved prices.`;
+    await loadMembershipData();
+  } catch (error) { showMembershipError(error); }
+});
 document.addEventListener('keydown', (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && currentUser) { event.preventDefault(); setScreen('contacts'); searchInput.focus(); }
 });
@@ -340,6 +493,7 @@ document.querySelector('#login-form').addEventListener('submit', async (event) =
     document.querySelector('#login-message').textContent = '';
     await Promise.all([loadHouseholdOptions(), loadTags()]);
     await refreshData();
+    if (location.hash === '#memberships') await loadMembershipData();
     if (user.role === 'admin' && location.hash === '#settings') loadSettings();
     document.querySelector('#contact-search').focus();
   } catch (error) { showError(error, '#login-message'); }
@@ -367,8 +521,8 @@ async function boot() {
     setSignedIn(user);
     await Promise.all([loadHouseholdOptions(), loadTags()]);
     await refreshData();
+    if (location.hash === '#memberships') await loadMembershipData();
     if (location.hash === '#settings') loadSettings();
   } catch (_error) { showSignedOut(); }
 }
 boot();
-

@@ -62,6 +62,22 @@ function initializeSchema(db) {
       price REAL NOT NULL, start_date TEXT, end_date TEXT, payment_status TEXT NOT NULL, payment_code TEXT,
       FOREIGN KEY (contact_id) REFERENCES contacts(id)
     );
+    CREATE TABLE IF NOT EXISTS membership_plans (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL CHECK (price >= 0),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE TABLE IF NOT EXISTS membership_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, membership_id TEXT NOT NULL REFERENCES memberships(id),
+      payment_code TEXT NOT NULL UNIQUE, amount REAL NOT NULL CHECK (amount >= 0),
+      payment_date TEXT, method TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK (status IN ('paid','pending','failed')),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    );
+    CREATE TABLE IF NOT EXISTS membership_periods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, membership_id TEXT NOT NULL REFERENCES memberships(id),
+      payment_id INTEGER NOT NULL UNIQUE REFERENCES membership_payments(id),
+      start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+      CHECK (start_date < end_date)
+    );
     CREATE TABLE IF NOT EXISTS donations (
       id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL,
       campaign TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', payment_code TEXT,
@@ -100,6 +116,29 @@ function initializeSchema(db) {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique_ci ON contacts(lower(trim(email))) WHERE trim(email) <> ''");
   db.exec('CREATE INDEX IF NOT EXISTS contacts_household_idx ON contacts(household_id)');
   db.exec('CREATE INDEX IF NOT EXISTS audit_record_idx ON audit_events(record_type, record_id, id DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS membership_period_dates_idx ON membership_periods(membership_id, start_date, end_date)');
+
+  const plans = [
+    ['individual', 'One person', 35], ['family', 'Family', 40], ['student_senior', 'Student or senior', 30]
+  ];
+  const insertPlan = db.prepare('INSERT OR IGNORE INTO membership_plans (id, name, price) VALUES (?, ?, ?)');
+  for (const plan of plans) insertPlan.run(...plan);
+
+  // Bring forward preexisting membership rows without changing their saved plan price or dates.
+  const legacyRows = db.prepare(`SELECT m.* FROM memberships m
+    LEFT JOIN membership_payments p ON p.payment_code = m.payment_code
+    WHERE m.payment_code IS NOT NULL AND p.id IS NULL`).all();
+  const migrateLegacy = db.transaction(() => {
+    for (const row of legacyRows) {
+      const payment = db.prepare(`INSERT INTO membership_payments (membership_id, payment_code, amount, payment_date, status)
+        VALUES (?, ?, ?, ?, ?)`).run(row.id, row.payment_code, row.price, row.start_date, ['paid', 'pending', 'failed'].includes(row.payment_status) ? row.payment_status : 'pending');
+      if (row.payment_status === 'paid' && row.start_date && row.end_date) {
+        db.prepare('INSERT INTO membership_periods (membership_id, payment_id, start_date, end_date) VALUES (?, ?, ?, ?)')
+          .run(row.id, payment.lastInsertRowid, row.start_date, row.end_date);
+      }
+    }
+  });
+  migrateLegacy();
 
   const insertUser = db.prepare('INSERT OR IGNORE INTO app_users (username, role, password_hash) VALUES (?, ?, ?)');
   const seedUsers = db.transaction(() => {
@@ -161,6 +200,69 @@ function cleanContact(input) {
   return { contact };
 }
 
+function validIsoDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function addMembershipYear(date) {
+  if (!validIsoDate(date)) throw new Error('Enter a real payment date in YYYY-MM-DD format.');
+  const [year, month, day] = date.split('-').map(Number);
+  const nextYear = year + 1;
+  const isLeap = (nextYear % 4 === 0 && nextYear % 100 !== 0) || nextYear % 400 === 0;
+  const nextDay = month === 2 && day === 29 && !isLeap ? 28 : day;
+  return `${nextYear}-${String(month).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`;
+}
+
+function daysBetween(start, end) {
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000);
+}
+
+function membershipState(db, membershipId, asOf) {
+  const periods = db.prepare('SELECT start_date, end_date FROM membership_periods WHERE membership_id = ? ORDER BY start_date').all(membershipId);
+  const activePeriods = periods.filter((period) => period.start_date <= asOf && asOf < period.end_date);
+  const latestPayment = db.prepare('SELECT status FROM membership_payments WHERE membership_id = ? ORDER BY id DESC LIMIT 1').get(membershipId);
+  if (activePeriods.length) {
+    let coveredUntil = activePeriods.reduce((latest, period) => period.end_date > latest ? period.end_date : latest, activePeriods[0].end_date);
+    let extended = true;
+    while (extended) {
+      extended = false;
+      for (const period of periods) {
+        if (period.start_date <= coveredUntil && period.end_date > coveredUntil) { coveredUntil = period.end_date; extended = true; }
+      }
+    }
+    const daysRemaining = daysBetween(asOf, coveredUntil);
+    return { status: 'active', daysRemaining, expiring: daysRemaining >= 1 && daysRemaining <= 30 };
+  }
+  if (periods.some((period) => period.start_date > asOf)) return { status: 'upcoming', daysRemaining: null, expiring: false };
+  if (periods.length) return { status: 'ended', daysRemaining: null, expiring: false };
+  if (latestPayment?.status === 'pending' || latestPayment?.status === 'failed') return { status: 'pending', daysRemaining: null, expiring: false };
+  return { status: 'pending', daysRemaining: null, expiring: false };
+}
+
+function summarizeMemberships(db, asOf) {
+  const memberships = db.prepare('SELECT id, contact_id, household_id FROM memberships').all();
+  const summary = { asOf, active: 0, peopleCovered: 0, endingSoon: 0, ended: 0, pending: 0, upcoming: 0 };
+  const covered = new Set();
+  for (const membership of memberships) {
+    const state = membershipState(db, membership.id, asOf);
+    if (state.status === 'active') {
+      summary.active += 1;
+      if (state.expiring) summary.endingSoon += 1;
+      const people = membership.household_id
+        ? db.prepare('SELECT id FROM contacts WHERE household_id = ? AND archived = 0').all(membership.household_id)
+        : db.prepare('SELECT id FROM contacts WHERE id = ? AND archived = 0').all(membership.contact_id);
+      for (const person of people) covered.add(person.id);
+    } else if (state.status === 'ended') summary.ended += 1;
+    else if (state.status === 'pending') summary.pending += 1;
+    else if (state.status === 'upcoming') summary.upcoming += 1;
+  }
+  summary.peopleCovered = covered.size;
+  return summary;
+}
+
 function createApp(db) {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -220,14 +322,152 @@ function createApp(db) {
   app.get('/api/overview', requireAuth, (_req, res) => {
     const today = readReferenceData().test_date;
     const activePeople = db.prepare('SELECT COUNT(*) AS count FROM contacts WHERE archived = 0').get().count;
-    const activeMemberships = db.prepare(`SELECT COUNT(*) AS count FROM memberships
-      WHERE payment_status = 'paid' AND start_date <= ? AND end_date >= ?`).get(today, today).count;
+    const memberSummary = summarizeMemberships(db, today);
     const donation = db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total FROM donations WHERE voided = 0').get();
-    const renewalDue = db.prepare(`SELECT COUNT(*) AS count FROM memberships
-      WHERE payment_status = 'paid' AND end_date >= ? AND end_date <= date(?, '+30 days')`).get(today, today).count;
+    const renewalDue = memberSummary.endingSoon;
     const overdueTasks = db.prepare("SELECT COUNT(*) AS count FROM tasks WHERE status = 'open' AND due_date < ?").get(today).count;
-    res.json({ testDate: today, activePeople, activeMemberships, donationCount: donation.count,
+    res.json({ testDate: today, activePeople, activeMemberships: memberSummary.active, donationCount: donation.count,
       donationTotal: donation.total, renewalsDue: renewalDue, overdueTasks });
+  });
+
+  app.get('/api/membership-plans', requireAuth, (_req, res) => {
+    res.json(db.prepare('SELECT id, name, price, updated_at FROM membership_plans ORDER BY CASE id WHEN \'individual\' THEN 1 WHEN \'family\' THEN 2 ELSE 3 END').all());
+  });
+
+  app.patch('/api/admin/membership-plans/:id', requireAuth, allowRoles('admin'), (req, res) => {
+    const price = Number(req.body.price);
+    if (!Number.isFinite(price) || price <= 0 || Math.round(price * 100) !== price * 100) return res.status(400).json({ error: 'Enter a price greater than $0 with no more than two decimal places.' });
+    const plan = db.prepare('SELECT id, name FROM membership_plans WHERE id = ?').get(req.params.id);
+    if (!plan) return res.status(404).json({ error: 'Membership plan not found.' });
+    db.prepare("UPDATE membership_plans SET price = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(price, plan.id);
+    audit(req.user, 'change plan price', 'membership plan', plan.id);
+    res.json(db.prepare('SELECT id, name, price, updated_at FROM membership_plans WHERE id = ?').get(plan.id));
+  });
+
+  app.get('/api/memberships/summary', requireAuth, (req, res) => {
+    const asOf = String(req.query.date || readReferenceData().test_date);
+    if (!validIsoDate(asOf)) return res.status(400).json({ error: 'Choose a real date in YYYY-MM-DD format.' });
+    res.json(summarizeMemberships(db, asOf));
+  });
+
+  app.get('/api/memberships', requireAuth, (req, res) => {
+    const asOf = String(req.query.date || readReferenceData().test_date);
+    if (!validIsoDate(asOf)) return res.status(400).json({ error: 'Choose a real date in YYYY-MM-DD format.' });
+    const memberships = db.prepare(`SELECT m.*, c.name AS contact_name, h.name AS household_name
+      FROM memberships m JOIN contacts c ON c.id = m.contact_id LEFT JOIN households h ON h.id = m.household_id
+      ORDER BY m.id COLLATE NOCASE`).all().map((membership) => ({
+      ...membership,
+      ...membershipState(db, membership.id, asOf),
+      periods: db.prepare('SELECT p.start_date, p.end_date, pay.amount, pay.payment_code, pay.payment_date, pay.method, pay.status AS payment_status FROM membership_periods p JOIN membership_payments pay ON pay.id = p.payment_id WHERE p.membership_id = ? ORDER BY p.start_date').all(membership.id),
+      payments: db.prepare('SELECT payment_code, amount, payment_date, method, status, created_at FROM membership_payments WHERE membership_id = ? ORDER BY id DESC').all(membership.id),
+      history: db.prepare("SELECT actor_name, action, record_type, record_id, occurred_at FROM audit_events WHERE record_type IN ('membership', 'membership plan') AND record_id = ? ORDER BY id DESC").all(membership.id)
+    }));
+    res.json(memberships);
+  });
+
+  function prepareMembership(input) {
+    const planId = String(input.plan || '').trim();
+    const plan = db.prepare('SELECT id, name, price FROM membership_plans WHERE id = ?').get(planId);
+    if (!plan) return { error: 'Choose one of the available membership plans.' };
+    let contactId = String(input.contact_id || '').trim();
+    const householdId = String(input.household_id || '').trim() || null;
+    if (planId === 'family') {
+      if (!householdId) return { error: 'Choose a household for a family membership.' };
+      const household = db.prepare('SELECT id FROM households WHERE id = ?').get(householdId);
+      if (!household) return { error: 'Choose an existing household.' };
+      if (!contactId) contactId = db.prepare('SELECT id FROM contacts WHERE household_id = ? AND archived = 0 ORDER BY id LIMIT 1').get(householdId)?.id || '';
+      const primaryPerson = db.prepare('SELECT id FROM contacts WHERE id = ? AND household_id = ? AND archived = 0').get(contactId, householdId);
+      if (!primaryPerson) return { error: 'Choose an active contact from that household.' };
+    } else {
+      if (householdId) return { error: 'Choose a household only for a family plan.' };
+      if (!contactId || !db.prepare('SELECT 1 FROM contacts WHERE id = ? AND archived = 0').get(contactId)) return { error: 'Choose an existing active contact.' };
+    }
+    const amount = Number(input.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) !== amount * 100) return { error: 'Enter a payment amount greater than $0 with no more than two decimal places.' };
+    if (Math.round(amount * 100) !== Math.round(plan.price * 100)) return { error: `The ${plan.name} plan costs $${plan.price.toFixed(2)}. Update the plan price as an admin or enter the correct amount.` };
+    const paymentCode = String(input.payment_code || '').trim();
+    if (!paymentCode) return { error: 'Enter a payment code.' };
+    if (db.prepare('SELECT 1 FROM membership_payments WHERE payment_code = ?').get(paymentCode)) return { error: 'That payment code has already been used.' };
+    const paymentDate = String(input.payment_date || '').trim();
+    if (!validIsoDate(paymentDate)) return { error: 'Enter a real payment date in YYYY-MM-DD format.' };
+    const status = String(input.payment_status || 'paid').trim();
+    if (!['paid', 'pending', 'failed'].includes(status)) return { error: 'Choose Paid, Pending, or Failed.' };
+    return { membership: { contactId, householdId, plan, amount, paymentCode, paymentDate, method: String(input.method || '').trim(), status } };
+  }
+
+  function insertPayment(membershipId, payment, periodStart = null) {
+    const endDate = periodStart ? addMembershipYear(periodStart) : null;
+    const paymentRow = db.prepare(`INSERT INTO membership_payments (membership_id, payment_code, amount, payment_date, method, status)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(membershipId, payment.paymentCode, payment.amount, payment.paymentDate, payment.method, payment.status);
+    if (payment.status === 'paid' && periodStart && endDate) {
+      db.prepare('INSERT INTO membership_periods (membership_id, payment_id, start_date, end_date) VALUES (?, ?, ?, ?)')
+        .run(membershipId, paymentRow.lastInsertRowid, periodStart, endDate);
+      db.prepare('UPDATE memberships SET start_date = ?, end_date = ?, payment_status = \'paid\', payment_code = ? WHERE id = ?')
+        .run(periodStart, endDate, payment.paymentCode, membershipId);
+    } else {
+      db.prepare('UPDATE memberships SET payment_status = ?, payment_code = ? WHERE id = ?')
+        .run(payment.status, payment.paymentCode, membershipId);
+    }
+    return { paymentId: paymentRow.lastInsertRowid, endDate };
+  }
+
+  app.post('/api/memberships', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const prepared = prepareMembership(req.body);
+    if (prepared.error) return res.status(400).json({ error: prepared.error });
+    const { membership } = prepared;
+    const id = String(req.body.id || '').trim() || `M${String((db.prepare("SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 100) AS last_id FROM memberships WHERE id GLOB 'M[0-9]*'").get().last_id) + 1).padStart(3, '0')}`;
+    if (db.prepare('SELECT 1 FROM memberships WHERE id = ?').get(id)) return res.status(409).json({ error: 'A membership with that ID already exists.' });
+    const tx = db.transaction(() => {
+      db.prepare(`INSERT INTO memberships (id, contact_id, household_id, plan, price, payment_status, payment_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, membership.contactId, membership.householdId, membership.plan.id, membership.amount, membership.status, membership.paymentCode);
+      insertPayment(id, membership, membership.status === 'paid' ? membership.paymentDate : null);
+      audit(req.user, 'add', 'membership', id);
+    });
+    try { tx(); } catch (error) {
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That payment code or membership ID is already in use.' });
+      console.error(error);
+      return res.status(500).json({ error: 'The membership could not be saved. No partial record was kept.' });
+    }
+    res.status(201).json({ id, status: membership.status, end_date: membership.status === 'paid' ? addMembershipYear(membership.paymentDate) : null });
+  });
+
+  app.post('/api/memberships/:id/renew', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
+    const existing = db.prepare('SELECT * FROM memberships WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Membership not found.' });
+    const payment = {
+      amount: Number(req.body.amount), paymentCode: String(req.body.payment_code || '').trim(),
+      paymentDate: String(req.body.payment_date || '').trim(), method: String(req.body.method || '').trim(),
+      status: String(req.body.payment_status || 'paid').trim()
+    };
+    if (!Number.isFinite(payment.amount) || payment.amount <= 0 || Math.round(payment.amount * 100) !== payment.amount * 100) return res.status(400).json({ error: 'Enter a payment amount greater than $0 with no more than two decimal places.' });
+    if (Math.round(payment.amount * 100) !== Math.round(existing.price * 100)) return res.status(400).json({ error: `This membership renews at its saved price of $${existing.price.toFixed(2)}.` });
+    if (!payment.paymentCode) return res.status(400).json({ error: 'Enter a payment code.' });
+    if (db.prepare('SELECT 1 FROM membership_payments WHERE payment_code = ?').get(payment.paymentCode)) return res.status(409).json({ error: 'That payment code has already been used.' });
+    if (!validIsoDate(payment.paymentDate)) return res.status(400).json({ error: 'Enter a real payment date in YYYY-MM-DD format.' });
+    if (!['paid', 'pending', 'failed'].includes(payment.status)) return res.status(400).json({ error: 'Choose Paid, Pending, or Failed.' });
+    const periods = db.prepare('SELECT start_date, end_date FROM membership_periods WHERE membership_id = ? ORDER BY start_date').all(existing.id);
+    let periodStart = payment.paymentDate;
+    let coveredUntil = periods.filter((period) => period.start_date <= payment.paymentDate && payment.paymentDate <= period.end_date)
+      .reduce((latest, period) => period.end_date > latest ? period.end_date : latest, '');
+    if (coveredUntil) {
+      let extended = true;
+      while (extended) {
+        extended = false;
+        for (const period of periods) if (period.start_date <= coveredUntil && period.end_date > coveredUntil) { coveredUntil = period.end_date; extended = true; }
+      }
+      periodStart = coveredUntil;
+    }
+    const tx = db.transaction(() => {
+      insertPayment(existing.id, payment, payment.status === 'paid' ? periodStart : null);
+      audit(req.user, 'renewal payment', 'membership', existing.id);
+    });
+    try { tx(); } catch (error) {
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That payment code has already been used.' });
+      console.error(error);
+      return res.status(500).json({ error: 'The renewal could not be saved. Existing membership time was kept.' });
+    }
+    res.status(201).json({ id: existing.id, payment_status: payment.status, start_date: payment.status === 'paid' ? periodStart : null,
+      end_date: payment.status === 'paid' ? addMembershipYear(periodStart) : null });
   });
 
   app.get('/api/households/options', requireAuth, (_req, res) => {
@@ -371,10 +611,26 @@ function createApp(db) {
           throw error;
         }
       }
+      for (const membership of data.memberships || []) {
+        const result = db.prepare(`INSERT OR IGNORE INTO memberships (id, contact_id, household_id, plan, price, start_date, end_date, payment_status, payment_code)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(membership.id, membership.contact_id, membership.household_id || null,
+          membership.plan, membership.price, membership.start_date, membership.end_date, membership.payment_status, membership.payment_code);
+        if (!result.changes) continue;
+        const payment = db.prepare(`INSERT OR IGNORE INTO membership_payments (membership_id, payment_code, amount, payment_date, method, status)
+          VALUES (?, ?, ?, ?, 'Practice data', ?)`).run(membership.id, membership.payment_code, membership.price, membership.start_date,
+          ['paid', 'pending', 'failed'].includes(membership.payment_status) ? membership.payment_status : 'pending');
+        if (membership.payment_status === 'paid' && membership.start_date && membership.end_date && payment.changes) {
+          db.prepare('INSERT INTO membership_periods (membership_id, payment_id, start_date, end_date) VALUES (?, ?, ?, ?)')
+            .run(membership.id, payment.lastInsertRowid, membership.start_date, membership.end_date);
+        }
+        audit(_req.user, 'import', 'membership', membership.id);
+      }
     });
     try { tx(); } catch (error) { return res.status(400).json({ error: `Practice-data import was rolled back: ${error.message}` }); }
+    const importedMembershipCount = (data.memberships || []).filter((membership) => db.prepare('SELECT 1 FROM membership_payments WHERE membership_id = ?').get(membership.id)).length;
     res.json({ inserted: inserted.length, skipped: skipped.length, active: db.prepare('SELECT COUNT(*) count FROM contacts WHERE archived = 0').get().count,
-      message: `Added ${inserted.length} practice contacts; kept ${skipped.length} existing contact records unchanged.` });
+      memberships: importedMembershipCount,
+      message: `Added ${inserted.length} practice contacts and loaded ${importedMembershipCount} practice memberships; kept existing contact records unchanged.` });
   });
 
   app.post('/api/import/contacts-csv', requireAuth, allowRoles('admin', 'staff'), (req, res) => {
@@ -467,4 +723,3 @@ if (require.main === module) {
 }
 
 module.exports = { createApp, initializeSchema, readReferenceData, parseCsv, cleanContact, DEMO_USERS };
-

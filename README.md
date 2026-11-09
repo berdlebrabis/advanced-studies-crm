@@ -33,11 +33,18 @@ Admin can manage users, set roles, and export contacts. Staff can add, edit, arc
 - The contact CSV importer maps `contact_id` to the contact ID and `household` to the household link. Existing IDs are skipped before other row validation so existing records are not overwritten. Invalid rows show a reason.
 - Archive hides a person from the active list while keeping the row, notes, household, and related records. Contact change history shows the actor, action, record, and time.
 
-Membership entry, donations, tasks, and their management screens are not built yet. Existing table slots remain, but the practice-data loader in this build imports contacts and households only.
+### Memberships
+
+- The practice-data button also loads the 20 supplied memberships and their payment/coverage history. Repeating the load does not replace saved records.
+- Add memberships for an individual, student/senior, or household plan. The default plan prices are $35, $30, and $40. Only admins can change those prices; saved memberships retain their price.
+- Staff and admins can record renewals. A paid renewal begins at the end of current connected coverage when renewed early, or on its payment date when late. Pending and failed payments do not add coverage.
+- Payment codes are unique. Membership history shows saved payments, paid date ranges, and who added or renewed each record. Counts use October 15, 2026 by default; select another date to recalculate active, ending-soon, ended, and pending membership counts and the covered-person count.
+- Yearly periods include their start date and exclude their end date. Leap-day renewals use February 28 in a non-leap year.
+
+Donations and tasks remain not built yet. Their existing table slots and menu destinations are retained.
 
 ## Tests
 
 ```powershell
 npm test
 ```
-

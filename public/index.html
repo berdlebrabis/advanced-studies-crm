@@ -67,7 +67,21 @@
         <article class="panel details-panel" id="contact-detail-card"><p class="empty">Select a contact from the Contacts screen.</p></article>
       </section>
 
-      <section class="screen placeholder-screen" id="screen-memberships" data-title="Memberships" hidden><p class="eyebrow">MEMBERSHIP RECORDS</p><h1>Memberships</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Plans, prices, payment status, and renewals will appear here after membership entry is built.</p></article></section>
+      <section class="screen" id="screen-memberships" data-title="Memberships" hidden>
+        <div class="page-heading"><div><p class="eyebrow">MEMBERSHIP RECORDS</p><h1>Memberships</h1><p class="subhead">Plans, paid years, and renewals for people and households.</p></div><button class="primary-button" id="add-membership" type="button" hidden>＋ Add Membership</button></div>
+        <article class="panel membership-toolbar"><label for="membership-as-of">Counts as of</label><input id="membership-as-of" type="date" value="2026-10-15"><p id="membership-message" class="inline-message" role="status" aria-live="polite"></p></article>
+        <section class="membership-metrics" aria-label="Membership counts">
+          <article class="metric-card"><span>Active memberships</span><strong id="membership-active-count">—</strong><small id="membership-people-count">people covered —</small></article>
+          <article class="metric-card"><span>Ending soon</span><strong id="membership-ending-count">—</strong><small>active memberships with 1–30 days left</small></article>
+          <article class="metric-card"><span>Ended</span><strong id="membership-ended-count">—</strong><small>no paid coverage on this date</small></article>
+          <article class="metric-card"><span>Waiting for payment</span><strong id="membership-pending-count">—</strong><small>no paid year recorded</small></article>
+        </section>
+        <article class="panel membership-panel">
+          <div class="panel-heading"><div><h2>Membership records</h2><p class="subhead">Renewals keep earlier payment and date history.</p></div></div>
+          <div class="table-wrap"><table><thead><tr><th>ID</th><th>Member</th><th>Plan</th><th>Saved price</th><th>Status on date</th><th>Paid through</th><th>Actions</th></tr></thead><tbody id="membership-rows"><tr><td colspan="7" class="loading">Loading memberships</td></tr></tbody></table></div>
+        </article>
+        <article class="panel membership-plans" id="membership-plan-editor" hidden><div class="panel-heading"><div><h2>Plan prices</h2><p class="subhead">Admin only. Changing a plan price does not change old memberships or payments.</p></div></div><div id="membership-plan-fields" class="plan-price-grid"></div></article>
+      </section>
       <section class="screen placeholder-screen" id="screen-donations" data-title="Donations" hidden><p class="eyebrow">GIVING</p><h1>Donations</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Donation entry and saved gifts will appear here after donation entry is built.</p></article></section>
       <section class="screen placeholder-screen" id="screen-tasks" data-title="Tasks" hidden><p class="eyebrow">FOLLOW-UP</p><h1>Tasks</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Contact tasks, owners, due dates, and completion will appear here after tasks are built.</p></article></section>
       <section class="screen placeholder-screen" id="screen-reports" data-title="Reports" hidden><p class="eyebrow">SAVED RECORDS</p><h1>Reports</h1><article class="panel empty-panel"><strong>Not built yet</strong><p>Reports will use saved records only. No sample totals are shown here.</p></article></section>
@@ -97,6 +111,37 @@
       <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-contact">Cancel</button><button class="primary-button" type="submit">Save</button></div>
     </form>
   </dialog>
+
+  <dialog id="membership-dialog" class="contact-dialog" aria-labelledby="membership-dialog-title">
+    <form id="membership-form" novalidate>
+      <div class="dialog-top"><div><p class="eyebrow">MEMBERSHIP PAYMENT</p><h2 id="membership-dialog-title">Add Membership</h2></div><button class="close-button" type="button" id="close-membership-dialog" aria-label="Close form">×</button></div>
+      <label for="membership-id">Membership ID <span class="field-hint">leave blank to assign automatically</span></label><input id="membership-id" name="id" autocomplete="off">
+      <label for="membership-contact">Primary contact <span class="field-hint">optional when choosing a household</span></label><select id="membership-contact" name="contact_id"></select>
+      <label for="membership-household">Household <span class="field-hint">required for a family plan</span></label><select id="membership-household" name="household_id"></select>
+      <label for="membership-plan">Plan</label><select id="membership-plan" name="plan" required></select>
+      <label for="membership-amount">Payment amount</label><input id="membership-amount" name="amount" type="number" min="0" step="0.01" required>
+      <label for="membership-payment-date">Payment date</label><input id="membership-payment-date" name="payment_date" type="date" required>
+      <label for="membership-method">Payment details / method</label><input id="membership-method" name="method" required placeholder="e.g. cash, card, check">
+      <label for="membership-payment-code">Payment code</label><input id="membership-payment-code" name="payment_code" required>
+      <label for="membership-payment-status">Payment status</label><select id="membership-payment-status" name="payment_status"><option value="paid">Paid</option><option value="pending">Pending</option><option value="failed">Failed</option></select>
+      <p id="membership-form-message" class="form-message" role="alert" aria-live="assertive"></p>
+      <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-membership">Cancel</button><button class="primary-button" type="submit">Save Membership</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="renew-dialog" class="contact-dialog" aria-labelledby="renew-dialog-title">
+    <form id="renew-form" novalidate>
+      <div class="dialog-top"><div><p class="eyebrow">KEEP PAID TIME</p><h2 id="renew-dialog-title">Renew Membership</h2></div><button class="close-button" type="button" id="close-renew-dialog" aria-label="Close form">×</button></div>
+      <input id="renew-membership-id" name="id" type="hidden">
+      <p id="renew-price-note" class="subhead"></p>
+      <label for="renew-amount">Payment amount</label><input id="renew-amount" name="amount" type="number" min="0" step="0.01" required>
+      <label for="renew-payment-date">Payment date</label><input id="renew-payment-date" name="payment_date" type="date" required>
+      <label for="renew-method">Payment details / method</label><input id="renew-method" name="method" required>
+      <label for="renew-payment-code">Payment code</label><input id="renew-payment-code" name="payment_code" required>
+      <label for="renew-payment-status">Payment status</label><select id="renew-payment-status" name="payment_status"><option value="paid">Paid</option><option value="pending">Pending</option><option value="failed">Failed</option></select>
+      <p id="renew-form-message" class="form-message" role="alert" aria-live="assertive"></p>
+      <div class="dialog-actions"><button class="secondary-button" type="button" id="cancel-renew">Cancel</button><button class="primary-button" type="submit">Save Renewal</button></div>
+    </form>
+  </dialog>
 </body>
 </html>
-

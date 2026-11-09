@@ -306,14 +306,232 @@ test('logout clears the session and the contact form keeps labeled accessible co
   assert.match(html, /id="auth-gate"/);
 }));
 
+test('practice membership import gives the October 15 baseline counts and exact date boundaries', async () => withClient(async (client) => {
+  const imported = await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  assert.equal(imported.response.status, 200);
+  assert.equal(imported.data.memberships, 20);
+  const baseline = (await client.request('/api/memberships/summary?date=2026-10-15')).data;
+  assert.deepEqual({ active: baseline.active, endingSoon: baseline.endingSoon, ended: baseline.ended, pending: baseline.pending, peopleCovered: baseline.peopleCovered },
+    { active: 12, endingSoon: 6, ended: 4, pending: 4, peopleCovered: 14 });
+  assert.equal((await client.request('/api/memberships?date=2026-10-15')).data.length, 20);
+  assert.equal((await client.request('/api/memberships/summary?date=2026-02-30')).response.status, 400);
+  const boundary = await client.request('/api/memberships/M103/renew', { method: 'POST', body: {
+    amount: 35, payment_code: 'BOUNDARY-01', payment_date: '2026-10-16', method: 'fake card', payment_status: 'pending'
+  } });
+  assert.equal(boundary.response.status, 201);
+  const onEndDate = (await client.request('/api/memberships/summary?date=2026-10-16')).data;
+  assert.equal(onEndDate.ended, 5);
+  assert.equal(onEndDate.active, 11);
+  const nextEndDate = (await client.request('/api/memberships/summary?date=2026-10-17')).data;
+  assert.equal(nextEndDate.ended, 6);
+  assert.equal(nextEndDate.active, 10);
+}));
+
+test('calendar anniversary handles leap day and December 31; 31-day and end-date counts are exact', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const leap = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'LEAP-DAY-01', payment_date: '2028-02-29', method: 'fake cash', payment_status: 'paid'
+  } });
+  assert.equal(leap.data.end_date, '2029-02-28');
+  const yearEnd = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'C129', plan: 'individual', amount: 35, payment_code: 'YEAR-END-01', payment_date: '2026-12-31', method: 'fake cash', payment_status: 'paid'
+  } });
+  assert.equal(yearEnd.data.end_date, '2027-12-31');
+  client.db.prepare(`INSERT INTO memberships (id, contact_id, plan, price, start_date, end_date, payment_status, payment_code)
+    VALUES ('M-BOUNDARY', 'C130', 'individual', 35, '2026-10-15', '2026-11-15', 'paid', 'BOUNDARY-31')`).run();
+  const payment = client.db.prepare(`INSERT INTO membership_payments (membership_id, payment_code, amount, payment_date, method, status)
+    VALUES ('M-BOUNDARY', 'BOUNDARY-31', 35, '2026-10-15', 'fake', 'paid')`).run();
+  client.db.prepare('INSERT INTO membership_periods (membership_id, payment_id, start_date, end_date) VALUES (?, ?, ?, ?)')
+    .run('M-BOUNDARY', payment.lastInsertRowid, '2026-10-15', '2026-11-15');
+  const on31 = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M-BOUNDARY');
+  assert.equal(on31.status, 'active');
+  assert.equal(on31.expiring, false);
+  const on30 = (await client.request('/api/memberships?date=2026-10-16')).data.find((item) => item.id === 'M-BOUNDARY');
+  assert.equal(on30.status, 'active');
+  assert.equal(on30.expiring, true);
+  assert.equal(on30.daysRemaining, 30);
+  const onEnd = (await client.request('/api/memberships?date=2026-11-15')).data.find((item) => item.id === 'M-BOUNDARY');
+  assert.equal(onEnd.status, 'ended');
+}));
+
+test('startup migration preserves legacy membership prices and coverage while adding payment history', () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE households (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', household_id TEXT, tags TEXT NOT NULL DEFAULT '[]', notes TEXT NOT NULL DEFAULT '', email_opt_in INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE memberships (id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, household_id TEXT, plan TEXT NOT NULL, price REAL NOT NULL, start_date TEXT, end_date TEXT, payment_status TEXT NOT NULL, payment_code TEXT);
+    INSERT INTO contacts (id,name) VALUES ('OLD-C1','Old fake contact');
+    INSERT INTO memberships VALUES ('OLD-M1','OLD-C1',NULL,'family',39.5,'2025-12-31','2026-12-31','paid','OLD-PAY-1');`);
+  initializeSchema(db);
+  const membership = db.prepare('SELECT * FROM memberships WHERE id = ?').get('OLD-M1');
+  assert.equal(membership.price, 39.5);
+  assert.equal(membership.end_date, '2026-12-31');
+  assert.equal(db.prepare('SELECT count(*) count FROM membership_payments WHERE payment_code = ?').get('OLD-PAY-1').count, 1);
+  assert.equal(db.prepare('SELECT count(*) count FROM membership_periods WHERE membership_id = ?').get('OLD-M1').count, 1);
+  db.close();
+});
+
+test('membership periods, payment details, counts, and change history persist across an app restart', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-membership-persist-'));
+  const file = path.join(dir, 'memberships.sqlite');
+  const first = await createClient({ file });
+  try {
+    await first.request('/api/import/practice-data', { method: 'POST', body: {} });
+    const renewal = await first.request('/api/memberships/M101/renew', { method: 'POST', body: {
+      amount: 40, payment_code: 'PERSIST-M101', payment_date: '2026-10-15', method: 'fake check', payment_status: 'paid'
+    } });
+    assert.equal(renewal.response.status, 201);
+  } finally { await first.close(); }
+  const second = await createClient({ file });
+  try {
+    const membership = (await second.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M101');
+    assert.equal(membership.periods.length, 2);
+    assert.equal(membership.periods[1].payment_code, 'PERSIST-M101');
+    assert.equal(membership.periods[1].method, 'fake check');
+    assert.equal(membership.history[0].action, 'renewal payment');
+    assert.equal(membership.history[0].actor_name, 'staff-demo');
+    assert.equal((await second.request('/api/memberships/summary?date=2026-10-15')).data.endingSoon, 5);
+  } finally { await second.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('early and late renewal preserve prior periods, use the saved price, and reject duplicate payment codes', async () => {
+  await withClient(async (client) => {
+    await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+    const before = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M101');
+    const renewed = await client.request('/api/memberships/M101/renew', { method: 'POST', body: {
+      amount: 40, payment_code: 'R-M101-01', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+    } });
+    assert.equal(renewed.response.status, 201);
+    assert.equal(renewed.data.start_date, '2026-10-31');
+    assert.equal(renewed.data.end_date, '2027-10-31');
+    const replay = await client.request('/api/memberships/M101/renew', { method: 'POST', body: {
+      amount: 40, payment_code: 'R-M101-01', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+    } });
+    assert.equal(replay.response.status, 409);
+    const after = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M101');
+    assert.equal(after.periods.length, 2);
+    assert.equal(after.payments.length, 2);
+    assert.deepEqual(after.periods[0], before.periods[0]);
+    const counts = (await client.request('/api/memberships/summary?date=2026-10-15')).data;
+    assert.equal(counts.active, 12);
+    assert.equal(counts.peopleCovered, 14);
+    assert.equal(counts.endingSoon, 5);
+  });
+  await withClient(async (client) => {
+    await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+    const renewed = await client.request('/api/memberships/M113/renew', { method: 'POST', body: {
+      amount: 35, payment_code: 'R-M113-LATE', payment_date: '2026-10-15', method: 'fake check', payment_status: 'paid'
+    } });
+    assert.equal(renewed.response.status, 201);
+    assert.equal(renewed.data.start_date, '2026-10-15');
+    assert.equal(renewed.data.end_date, '2027-10-15');
+    const details = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M113');
+    assert.equal(details.periods.length, 2);
+    assert.equal(details.history[0].actor_name, 'staff-demo');
+  });
+});
+
+test('new memberships validate plans, contacts, dates, amounts, and payment status before adding time', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const dateError = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'BAD-DATE', payment_date: '2026-02-30', method: 'cash', payment_status: 'paid'
+  } });
+  assert.equal(dateError.response.status, 400);
+  const amountError = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'C130', plan: 'individual', amount: 30, payment_code: 'BAD-AMOUNT', payment_date: '2026-10-15', method: 'cash', payment_status: 'paid'
+  } });
+  assert.equal(amountError.response.status, 400);
+  const invalidContact = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'NO-SUCH-PERSON', plan: 'individual', amount: 35, payment_code: 'BAD-LINK', payment_date: '2026-10-15', method: 'cash', payment_status: 'paid'
+  } });
+  assert.equal(invalidContact.response.status, 400);
+  const missingRenewal = await client.request('/api/memberships/M-NOPE/renew', { method: 'POST', body: {
+    amount: 35, payment_code: 'NO-MEMBER', payment_date: '2026-10-15', method: 'cash', payment_status: 'paid'
+  } });
+  assert.equal(missingRenewal.response.status, 404);
+  const created = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'C130', plan: 'individual', amount: 35, payment_code: 'NEW-C130-01', payment_date: '2026-10-15', method: 'fake card', payment_status: 'paid'
+  } });
+  assert.equal(created.response.status, 201);
+  assert.equal(created.data.end_date, '2027-10-15');
+  const summary = (await client.request('/api/memberships/summary?date=2026-10-15')).data;
+  assert.deepEqual({ active: summary.active, endingSoon: summary.endingSoon, peopleCovered: summary.peopleCovered }, { active: 13, endingSoon: 6, peopleCovered: 15 });
+  assert.equal(client.db.prepare("SELECT count(*) count FROM membership_payments WHERE payment_code IN ('BAD-DATE','BAD-AMOUNT','BAD-LINK','NO-MEMBER')").get().count, 0);
+}));
+
+test('failed and pending payments do not extend paid coverage; replay and invalid payment leave records unchanged', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  for (const [code, status] of [['FAIL-M101', 'failed'], ['WAIT-M101', 'pending']]) {
+    const result = await client.request('/api/memberships/M101/renew', { method: 'POST', body: {
+      amount: 40, payment_code: code, payment_date: '2026-10-20', method: 'fake card', payment_status: status
+    } });
+    assert.equal(result.response.status, 201);
+    assert.equal(result.data.start_date, null);
+  }
+  const bad = await client.request('/api/memberships/M101/renew', { method: 'POST', body: {
+    amount: 41, payment_code: 'WRONG-AMOUNT', payment_date: '2026-10-20', method: 'fake card', payment_status: 'paid'
+  } });
+  assert.equal(bad.response.status, 400);
+  const membership = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M101');
+  assert.equal(membership.periods.length, 1);
+  assert.equal(membership.periods[0].end_date, '2026-10-31');
+  assert.equal(membership.payments.length, 3);
+  assert.equal((await client.request('/api/memberships/summary?date=2026-10-15')).data.active, 12);
+}));
+
+test('family memberships count each linked person once and preserve date, payment, and history details', async () => withClient(async (client) => {
+  await client.request('/api/import/practice-data', { method: 'POST', body: {} });
+  for (const id of ['F900-1', 'F900-2', 'F900-3']) {
+    const contact = await addContact(client, { id, name: `Fake family ${id}`, email: '', household_id: 'H900', household_name: 'Fake family test' });
+    assert.equal(contact.response.status, 201);
+  }
+  const membership = await client.request('/api/memberships', { method: 'POST', body: {
+    contact_id: 'F900-1', household_id: 'H900', plan: 'family', amount: 40, payment_code: 'FAMILY-H900', payment_date: '2026-10-15', method: 'fake check', payment_status: 'paid'
+  } });
+  assert.equal(membership.response.status, 201);
+  const summary = (await client.request('/api/memberships/summary?date=2026-10-15')).data;
+  assert.equal(summary.peopleCovered, 17);
+  const detail = (await client.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === membership.data.id);
+  assert.equal(detail.household_id, 'H900');
+  assert.equal(detail.periods[0].payment_code, 'FAMILY-H900');
+  assert.equal(detail.history[0].action, 'add');
+}));
+
+test('only admins change plan prices; historical paid prices remain fixed and audit records the actor', async () => withClient(async (staff) => {
+  await staff.request('/api/import/practice-data', { method: 'POST', body: {} });
+  const viewer = await staff.loginAs('viewer-demo', 'ViewerDemo2026!');
+  const admin = await staff.loginAs('admin-demo', 'AdminDemo2026!');
+  const patch = async (cookie, price) => fetch(`${staff.baseUrl}/api/admin/membership-plans/individual`, { method: 'PATCH',
+    headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ price }) });
+  assert.equal((await patch(staff.cookie, 45)).status, 403);
+  assert.equal((await patch(viewer.cookie, 45)).status, 403);
+  const viewerWrite = await fetch(`${staff.baseUrl}/api/memberships/M101/renew`, { method: 'POST', headers: { cookie: viewer.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ amount: 40, payment_code: 'VIEWER-RENEW', payment_date: '2026-10-15', method: 'fake', payment_status: 'paid' }) });
+  assert.equal(viewerWrite.status, 403);
+  const changed = await patch(admin.cookie, 45);
+  assert.equal(changed.status, 200);
+  const oldMembership = (await staff.request('/api/memberships?date=2026-10-15')).data.find((item) => item.id === 'M103');
+  assert.equal(oldMembership.price, 35);
+  const renewal = await staff.request('/api/memberships/M103/renew', { method: 'POST', body: {
+    amount: 35, payment_code: 'SAVED-PRICE-RENEW', payment_date: '2026-10-15', method: 'fake cash', payment_status: 'paid'
+  } });
+  assert.equal(renewal.response.status, 201);
+  const audited = (await staff.request('/api/audit')).data.find((item) => item.record_type === 'membership plan');
+  assert.equal(audited.actor_name, 'admin-demo');
+  assert.equal(audited.action, 'change plan price');
+}));
+
 test('previous eight-menu structure remains and the unfinished CRM screens are still labeled honestly', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const links = [...html.matchAll(/<a class="nav-link" href="#([^"]+)" data-screen="([^"]+)">/g)];
   assert.equal(links.length, 8);
   for (const [, hash, screen] of links) assert.equal(hash, screen);
-  for (const screen of ['memberships', 'donations', 'tasks', 'reports']) {
+  for (const screen of ['donations', 'tasks', 'reports']) {
     const section = html.match(new RegExp(`<section class="screen placeholder-screen" id="screen-${screen}"[\\s\\S]*?<\\/section>`))?.[0] || '';
     assert.match(section, /Not built yet/);
   }
+  assert.match(html, /id="add-membership" type="button" hidden/);
+  assert.match(html, /id="membership-plan-editor" hidden/);
+  assert.match(app, /function roleCanWrite\(\) \{ return currentUser && \['admin', 'staff'\]\.includes\(currentUser\.role\); \}/);
+  assert.match(app, /user\.role !== 'admin'/);
+  assert.match(app, /roleCanWrite\(\) \? `<button class="secondary-button renew-membership"/);
 });
-
